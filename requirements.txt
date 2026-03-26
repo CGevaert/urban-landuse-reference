@@ -1,0 +1,11 @@
+geopandas
+shapely
+pyproj
+fiona
+overpy
+pyrosm
+duckdb
+hdx-python-api
+pandas
+tqdm
+requests
