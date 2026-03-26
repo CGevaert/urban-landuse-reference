@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # landuse_ref — Multi-Source Reference Land-Use Dataset for Urban Areas
 
 ## 1. Overview
@@ -259,7 +260,7 @@ The pipeline includes three non-blocking validation checkpoints that run automat
 
 If you use this pipeline or the datasets it produces in published research, please cite:
 
-> Author, A. A. (2025). *landuse_ref: A multi-source reference land-use dataset pipeline for building-level classification in data-scarce urban contexts* [Software]. GitHub. https://github.com/your-org/landuse_ref
+> Gevaert, C. M. (2025). *landuse_ref: A multi-source reference land-use dataset pipeline for building-level classification in data-scarce urban contexts* [Software]. GitHub. https://github.com/your-org/landuse_ref
 
 ### Acknowledgements
 
@@ -272,3 +273,7 @@ This pipeline relies on data and infrastructure maintained by the following orga
 **IOM Displacement Tracking Matrix (DTM)** — Displacement site locations and attributes are sourced from the IOM DTM Site Assessment and CCCM Cluster South Sudan Site Masterlist, distributed via the Humanitarian Data Exchange (HDX). © International Organization for Migration.
 
 **OCHA / Humanitarian Data Exchange** — Displacement-related datasets are distributed through the UN OCHA Humanitarian Data Exchange platform (data.humdata.org). OCHA is not responsible for the content or analysis presented in outputs produced by this pipeline.
+=======
+# urban-landuse-reference
+Code to generate reference data for land use classification in cities. This is done by taking data from: OSM, Overture, and CCCM for refugee campls.
+>>>>>>> 142125d023ae119d0cad307ff0001e4347a07104

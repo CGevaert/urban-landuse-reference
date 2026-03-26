@@ -250,7 +250,7 @@ def validate_joins(labelled_gdf: gpd.GeoDataFrame) -> Dict:
     tier_counts: Dict = {}
     tier_col = labelled_gdf["lu_tier"].astype(str)
 
-    for tier_label in ["1", "2", "2+3", "3", "4", "5"]:
+    for tier_label in ["1", "2", "2+3", "3", "3b", "3+3b", "4", "5"]:
         cnt = int((tier_col == tier_label).sum())
         tier_counts[f"tier_{tier_label}"] = cnt
         pct = 100 * cnt / n if n else 0

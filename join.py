@@ -196,7 +196,72 @@ def _join_osm_landuse(
 
 
 # ---------------------------------------------------------------------------
-# Step 5 — OSM POI 5 m buffer join
+# Step 4b — OSM POI within-footprint join (+ 5 m exterior fallback)
+#            Used as the Tier 3b labelling signal.
+# ---------------------------------------------------------------------------
+
+def _join_osm_pois(
+    footprints: gpd.GeoDataFrame,
+    osm_pois: gpd.GeoDataFrame,
+    buffer_m: float = 5.0,
+) -> Dict[int, List[pd.Series]]:
+    """
+    Collect OSM POI nodes associated with each footprint for Tier 3b labelling.
+
+    Two passes are performed:
+
+    1. Strict within join (``sjoin predicate='within'``): POI points that fall
+       entirely inside the footprint polygon.
+    2. Exterior buffer fallback: POIs not matched in pass 1 that fall within
+       *buffer_m* metres of the footprint boundary.  This catches entrance
+       nodes and POIs snapped to a building edge, which are common in OSM.
+
+    Returns
+    -------
+    dict
+        ``{footprint_index: [osm_pois row, ...]}``.  Only footprints with at
+        least one associated POI are included.
+    """
+    if osm_pois.empty:
+        return {}
+
+    # Pass 1 — strict within
+    joined_within = gpd.sjoin(
+        osm_pois,
+        footprints[["geometry"]],
+        how="inner",
+        predicate="within",
+    )
+
+    result: Dict[int, List[pd.Series]] = {}
+    matched_poi_indices: set = set()
+
+    for fp_i, group in joined_within.groupby("index_right"):
+        valid = [i for i in group.index if i in osm_pois.index]
+        if valid:
+            result[int(fp_i)] = [osm_pois.loc[i] for i in valid]
+            matched_poi_indices.update(valid)
+
+    # Pass 2 — 5 m exterior buffer fallback for unmatched POIs
+    unmatched = osm_pois[~osm_pois.index.isin(matched_poi_indices)]
+    if not unmatched.empty:
+        sindex = unmatched.sindex
+        for fp_i, fp_row in footprints.iterrows():
+            search_zone = fp_row.geometry.buffer(buffer_m)
+            candidate_pos = list(sindex.query(search_zone, predicate="within"))
+            if not candidate_pos:
+                continue
+            rows = [unmatched.iloc[pos] for pos in candidate_pos]
+            if fp_i in result:
+                result[fp_i].extend(rows)
+            else:
+                result[fp_i] = rows
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Step 5 — OSM POI 5 m buffer join (mixed-use POI signal)
 # ---------------------------------------------------------------------------
 
 def _join_pois_buffer(
@@ -349,23 +414,27 @@ def run_joins(layers_dict: dict) -> gpd.GeoDataFrame:
     n = len(footprints)
     print(f"\nProcessing {n:,} building footprints…")
 
-    print("  [1/5] CCCM centroid join…")
+    print("  [1/6] CCCM centroid join…")
     cccm_by_fp = _join_cccm(footprints, cccm_sites)
     print(f"        {len(cccm_by_fp):,} footprints matched to CCCM sites.")
 
-    print("  [2/5] OSM building overlap join (threshold = 0.30)…")
+    print("  [2/6] OSM building overlap join (threshold = 0.30)…")
     osm_bld_by_fp = _join_osm_buildings(footprints, osm_buildings)
     print(f"        {len(osm_bld_by_fp):,} footprints matched to OSM buildings.")
 
-    print("  [3/5] Overture Places within-footprint join…")
+    print("  [3/6] Overture Places within-footprint join…")
     overture_by_fp = _join_overture(footprints, overture_places)
     print(f"        {len(overture_by_fp):,} footprints have Overture matches.")
 
-    print("  [4/5] OSM landuse centroid join…")
+    print("  [4/6] OSM POI within-footprint join (+ 5 m fallback)…")
+    osm_poi_by_fp = _join_osm_pois(footprints, osm_pois)
+    print(f"        {len(osm_poi_by_fp):,} footprints have OSM POI matches (Tier 3b).")
+
+    print("  [5/6] OSM landuse centroid join…")
     landuse_by_fp = _join_osm_landuse(footprints, osm_landuse)
     print(f"        {len(landuse_by_fp):,} footprints matched to OSM landuse zones.")
 
-    print("  [5/5] OSM POI 5 m buffer join…")
+    print("  [6/6] OSM POI 5 m buffer join (mixed-use signal)…")
     pois_by_fp = _join_pois_buffer(footprints, osm_pois)
     print(f"        {len(pois_by_fp):,} footprints have nearby POIs.")
 
@@ -382,6 +451,7 @@ def run_joins(layers_dict: dict) -> gpd.GeoDataFrame:
             overture_matches=ov_ms,
             osm_landuse_match=landuse_by_fp.get(fp_i),
             cccm_match=cccm_by_fp.get(fp_i),
+            osm_poi_matches=osm_poi_by_fp.get(fp_i, []),
         )
 
         pois_near = pois_by_fp.get(fp_i, _empty_pois)

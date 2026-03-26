@@ -34,7 +34,7 @@ CRS_PROJ: str = "EPSG:32636"
 """Projected CRS (WGS 84 / UTM Zone 36N, metres). Suitable for spatial
 operations covering East Africa.  Use for distance, area, and buffer work."""
 
-POINT_BUFFER_M: int = 250
+POINT_BUFFER_M: int = 100
 """Buffer distance in metres applied around point geometries when converting
 them to polygonal features for spatial analysis."""
 

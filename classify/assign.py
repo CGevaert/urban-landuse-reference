@@ -4,7 +4,7 @@ classify/assign.py — Rule-based land-use label assignment for building footpri
 Public functions
 ----------------
 assign_label(building_row, osm_building_match, overture_matches,
-             osm_landuse_match, cccm_match) → dict
+             osm_landuse_match, cccm_match, osm_poi_matches) → dict
 """
 
 import sys
@@ -38,6 +38,15 @@ _TAG_PRIORITY = [
     "military",
     "aeroway",
     "social_facility",
+]
+
+# Tag keys used for Tier 3b (POI nodes — building/landuse tags excluded)
+_POI_TAG_PRIORITY = [
+    "amenity",
+    "shop",
+    "office",
+    "leisure",
+    "public_transport",
 ]
 
 _UNCLASSIFIED: Dict[str, Any] = {
@@ -185,9 +194,10 @@ def assign_label(
     overture_matches: List[pd.Series],
     osm_landuse_match: Optional[pd.Series],
     cccm_match: Optional[pd.Series],
+    osm_poi_matches: Optional[List[pd.Series]] = None,
 ) -> Dict[str, Any]:
     """
-    Assign a land-use label to a single building footprint using a five-tier
+    Assign a land-use label to a single building footprint using a six-tier
     rule hierarchy.
 
     Parameters
@@ -204,6 +214,9 @@ def assign_label(
         The OSM landuse polygon whose area contains this footprint's centroid.
     cccm_match : pd.Series or None
         The CCCM site polygon containing this footprint's centroid.
+    osm_poi_matches : list of pd.Series or None
+        OSM POI nodes that fall within the footprint polygon or within 5 m of
+        its exterior.  Used for Tier 3b labelling.
 
     Returns
     -------
@@ -214,14 +227,20 @@ def assign_label(
 
     Tier hierarchy
     --------------
-    1  CCCM site match   → Temporary Housing (authoritative ground-truth)
-    2  OSM building tags → resolve class(es) from OSM_TAG_CLASS
-    3  Overture Places   → resolve class(es) from OVERTURE_L0_CLASS
-    2+3 Cross-tier       → Mixed Use when Tier 2 and Tier 3 disagree on a
-                           trigger pair
-    4  OSM landuse zone  → low-confidence class from the enclosing polygon
-    5  Unclassified      → no evidence available
+    1    CCCM site match   → Temporary Housing (authoritative ground-truth)
+    2    OSM building tags → resolve class(es) from OSM_TAG_CLASS
+    3    Overture Places   → resolve class(es) from OVERTURE_L0_CLASS
+    2+3  Cross-tier        → Mixed Use when Tier 2 and Tier 3 disagree on a
+                             trigger pair
+    3b   OSM POI nodes     → resolve class from OSM_TAG_CLASS using POI tags
+                             (amenity, shop, office, leisure, public_transport)
+    3+3b Cross-tier        → Mixed Use when Tier 3 and Tier 3b disagree on a
+                             trigger pair
+    4    OSM landuse zone  → low-confidence class from the enclosing polygon
+    5    Unclassified      → no evidence available
     """
+    if osm_poi_matches is None:
+        osm_poi_matches = []
 
     # ------------------------------------------------------------------
     # Tier 1 — CCCM ground-truth
@@ -320,13 +339,76 @@ def assign_label(
     if tier2_class is not None and tier2_entry is not None:
         return _single_class_result(tier2_entry, tier=2, source="osm_building")
 
-    # Return Tier 3 result if available
+    # ------------------------------------------------------------------
+    # Tier 3b — OSM POI nodes within or near the footprint
+    # ------------------------------------------------------------------
+    tier3b_class: Optional[str] = None
+    tier3b_entry: Optional[Dict] = None
+
+    if osm_poi_matches:
+        poi_entries: List[Dict] = []
+        for poi_row in osm_poi_matches:
+            # Take the highest-priority tag from each POI (one entry per node)
+            for key in _POI_TAG_PRIORITY:
+                value = _get_field(poi_row, key)
+                if value is None:
+                    continue
+                entry = _lookup_entry(key, value)
+                if entry:
+                    poi_entries.append(entry)
+                    break
+
+        distinct_3b = _distinct_classes(poi_entries)
+
+        if len(distinct_3b) == 1:
+            tier3b_class = distinct_3b[0]
+            tier3b_entry = next(e for e in poi_entries if e["lu_class"] == tier3b_class)
+
+        elif len(distinct_3b) >= 2:
+            if _triggers_mixed_use(distinct_3b):
+                return _mixed_use_result(
+                    components=distinct_3b[:2],
+                    tier="3b",
+                    source="osm_poi",
+                    confidence="medium",
+                )
+            else:
+                # Multiple classes but no trigger pair — take highest-priority
+                tier3b_class = distinct_3b[0]
+                tier3b_entry = next(e for e in poi_entries if e["lu_class"] == tier3b_class)
+
+    # ------------------------------------------------------------------
+    # Cross-tier check (3 + 3b) — upgrade to Mixed Use if they disagree
+    # ------------------------------------------------------------------
+    if tier3_class is not None and tier3b_class is not None:
+        if tier3_class != tier3b_class:
+            if frozenset({tier3_class, tier3b_class}) in MIXED_USE_TRIGGER_PAIRS:
+                return _mixed_use_result(
+                    components=[tier3_class, tier3b_class],
+                    tier="3+3b",
+                    source="overture+osm_poi",
+                    confidence="medium",
+                )
+
+    # Return Tier 3 result if available (takes precedence over 3b)
     if tier3_class is not None:
         return {
             "lu_class": tier3_class,
             "lu_subclass": None,
             "lu_tier": 3,
             "lu_source": "overture",
+            "lu_confidence": "medium",
+            "lu_class_components": None,
+            "geometry_source": None,
+        }
+
+    # Return Tier 3b result if available
+    if tier3b_class is not None and tier3b_entry is not None:
+        return {
+            "lu_class": tier3b_entry["lu_class"],
+            "lu_subclass": tier3b_entry["lu_subclass"],
+            "lu_tier": "3b",
+            "lu_source": "osm_poi",
             "lu_confidence": "medium",
             "lu_class_components": None,
             "geometry_source": None,
