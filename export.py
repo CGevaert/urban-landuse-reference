@@ -4,6 +4,7 @@ export.py — Write the labelled buildings to the reference GeoPackage.
 Public functions
 ----------------
 export_reference_dataset(labelled_gdf) → None
+export_open_space_layer(layers_dict)   → None
 """
 
 import sys
@@ -15,8 +16,9 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import OUTPUT_GPKG  # noqa: E402
+from config import AOI_GEOM, CRS_GEO, OUTPUT_GPKG  # noqa: E402
 from acquire.osm import _drop_gpkg_layer  # noqa: E402
+from classify.lookup import OSM_TAG_CLASS, OVERTURE_L0_CLASS  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Exact output column order
@@ -52,6 +54,51 @@ _ID_CANDIDATES = [
 _LAYER_NAME = "reference_buildings"
 _UNMATCHED_LAYER_NAME = "unmatched_points"
 _UNMATCHED_COLUMNS = ["footprint_id", "geometry", "osm_building_id", "osm_building_tag", "osm_landuse"]
+
+_OPEN_SPACE_LAYER_NAME = "open_space_polygons"
+_UNMATCHED_POIS_LAYER_NAME = "unmatched_pois"
+
+# Tag key priority order used to resolve lu_class_candidate for OSM POIs
+_POI_TAG_PRIORITY = ["amenity", "shop", "office", "leisure", "public_transport"]
+
+# Tag values that qualify a landuse polygon as open space, keyed by OSM tag.
+# Priority when a row matches multiple keys: natural > leisure > landuse.
+_OS_FILTER: dict = {
+    "landuse": {
+        "grass", "meadow", "forest", "cemetery", "recreation_ground",
+        "village_green", "allotments", "orchard", "farmland", "farmyard",
+        "basin", "reservoir", "flowerbed",
+    },
+    "leisure": {
+        "park", "pitch", "playground", "nature_reserve", "garden",
+        "common", "dog_park",
+    },
+    "natural": {
+        "water", "wetland", "wood", "scrub", "heath", "grassland",
+        "beach", "sand",
+    },
+}
+
+# Mapping from individual tag values to the five os_class categories.
+_OS_CLASS_MAP: dict = {
+    # Vegetation
+    "grass": "Vegetation", "meadow": "Vegetation", "forest": "Vegetation",
+    "flowerbed": "Vegetation", "allotments": "Vegetation",
+    "orchard": "Vegetation", "nature_reserve": "Vegetation",
+    "garden": "Vegetation", "wood": "Vegetation", "scrub": "Vegetation",
+    "heath": "Vegetation", "grassland": "Vegetation", "sand": "Vegetation",
+    # Water
+    "water": "Water", "wetland": "Water", "basin": "Water",
+    "reservoir": "Water",
+    # Recreation
+    "recreation_ground": "Recreation", "village_green": "Recreation",
+    "park": "Recreation", "pitch": "Recreation", "playground": "Recreation",
+    "common": "Recreation", "dog_park": "Recreation", "beach": "Recreation",
+    # Agriculture
+    "farmland": "Agriculture", "farmyard": "Agriculture",
+    # Cemetery
+    "cemetery": "Cemetery",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -286,3 +333,240 @@ def export_reference_dataset(labelled_gdf: gpd.GeoDataFrame) -> None:
     print(f"  Summary CSV → {summary_csv.name}")
 
     _print_final_summary(labelled, n_unmatched=len(unlabelled))
+
+
+def export_open_space_layer(layers_dict: dict) -> None:
+    """
+    Build and write an open-space polygon layer from OSM landuse polygons.
+
+    This function operates on the raw ``osm_landuse`` layer from
+    *layers_dict* — it does not involve building footprints.  Features are
+    filtered to a curated set of tag values covering vegetation, water,
+    recreation, agriculture, and cemetery land cover, then clipped to the
+    study-area AOI and written to ``config.OUTPUT_GPKG`` as the layer
+    ``open_space_polygons`` in EPSG:4326.
+
+    Columns written
+    ---------------
+    osm_id         : str   — OSM element identifier
+    geometry       : Polygon / MultiPolygon — in EPSG:4326
+    os_class       : str   — one of Vegetation / Water / Recreation /
+                             Agriculture / Cemetery
+    osm_tag_key    : str   — the OSM key that triggered inclusion
+                             (natural > leisure > landuse by priority)
+    osm_tag_value  : str   — the corresponding OSM tag value
+
+    Parameters
+    ----------
+    layers_dict : dict
+        Output of :func:`preprocess.align.align_layers`.  All GeoDataFrames
+        must be in CRS_PROJ (EPSG:32636).
+    """
+    import geopandas as gpd
+    import pandas as pd
+
+    raw = layers_dict.get("osm_landuse", gpd.GeoDataFrame())
+    if raw.empty:
+        print("  [open_space] osm_landuse is empty — layer not written.")
+        return
+
+    # Reproject to EPSG:4326 for clipping against AOI_GEOM and final storage
+    gdf = raw.to_crs(CRS_GEO).copy()
+
+    # ------------------------------------------------------------------
+    # Resolve which tag key/value each row matches and whether it qualifies.
+    # Priority: natural > leisure > landuse (when multiple keys are present).
+    # ------------------------------------------------------------------
+    tag_keys: list = []
+    tag_vals: list = []
+    keep: list = []
+
+    for _, row in gdf.iterrows():
+        matched_key = None
+        matched_val = None
+
+        for key in ("natural", "leisure", "landuse"):
+            if key not in gdf.columns:
+                continue
+            val = row.get(key)
+            if val is None or (isinstance(val, float) and pd.isna(val)):
+                continue
+            val = str(val).strip()
+            if val in _OS_FILTER[key]:
+                matched_key = key
+                matched_val = val
+                break  # highest-priority match found
+
+        tag_keys.append(matched_key)
+        tag_vals.append(matched_val)
+        keep.append(matched_key is not None)
+
+    gdf = gdf[keep].copy()
+    gdf["osm_tag_key"] = [k for k, flag in zip(tag_keys, keep) if flag]
+    gdf["osm_tag_value"] = [v for v, flag in zip(tag_vals, keep) if flag]
+    gdf["os_class"] = gdf["osm_tag_value"].map(_OS_CLASS_MAP)
+
+    if gdf.empty:
+        print("  [open_space] No qualifying features found — layer not written.")
+        return
+
+    # ------------------------------------------------------------------
+    # Clip to AOI_GEOM (EPSG:4326)
+    # ------------------------------------------------------------------
+    try:
+        gdf = gdf.clip(mask=AOI_GEOM).copy()
+    except Exception:
+        gdf = gdf[gdf.geometry.intersects(AOI_GEOM)].copy()
+
+    gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty].copy()
+
+    if gdf.empty:
+        print("  [open_space] No features remain after AOI clip — layer not written.")
+        return
+
+    # ------------------------------------------------------------------
+    # Select output columns and write
+    # ------------------------------------------------------------------
+    out_cols = ["osm_id", "geometry", "os_class", "osm_tag_key", "osm_tag_value"]
+    for col in out_cols:
+        if col not in gdf.columns:
+            gdf[col] = None
+    out = gdf[out_cols].copy()
+
+    OUTPUT_GPKG.parent.mkdir(parents=True, exist_ok=True)
+    if OUTPUT_GPKG.exists():
+        _drop_gpkg_layer(OUTPUT_GPKG, _OPEN_SPACE_LAYER_NAME)
+
+    out.to_file(str(OUTPUT_GPKG), driver="GPKG", layer=_OPEN_SPACE_LAYER_NAME, mode="a")
+    print(
+        f"  Written {len(out):,} open-space polygons → "
+        f"{OUTPUT_GPKG.name} (layer: {_OPEN_SPACE_LAYER_NAME})"
+    )
+
+
+def export_unmatched_pois(
+    unmatched_osm_pois_gdf: gpd.GeoDataFrame,
+    unmatched_overture_gdf: gpd.GeoDataFrame,
+) -> None:
+    """
+    Write POI features that were not matched to any building footprint to
+    ``config.OUTPUT_GPKG`` as the layer ``unmatched_pois`` in EPSG:4326.
+
+    Both OSM POI nodes and Overture Places records that were not spatially
+    associated with any footprint during the join phase are included.
+    They are normalised to a common schema and concatenated before writing.
+
+    Columns written
+    ---------------
+    source            : str  — 'osm_poi' or 'overture'
+    geometry          : Point — in EPSG:4326
+    name              : str  — feature name (or None)
+    lu_class_candidate: str  — indicative land-use class resolved from tag/category
+    raw_tag           : str  — the original tag value used to resolve the class
+    confidence        : float — Overture confidence score (None for OSM rows)
+
+    Parameters
+    ----------
+    unmatched_osm_pois_gdf : gpd.GeoDataFrame
+        OSM POI nodes not matched to any footprint, in EPSG:4326.
+    unmatched_overture_gdf : gpd.GeoDataFrame
+        Overture Places records not matched to any footprint, in EPSG:4326.
+    """
+    _SHARED_COLS = ["source", "geometry", "name", "lu_class_candidate", "raw_tag", "confidence"]
+
+    parts = []
+
+    # ------------------------------------------------------------------
+    # OSM POI rows
+    # ------------------------------------------------------------------
+    if not unmatched_osm_pois_gdf.empty:
+        osm = unmatched_osm_pois_gdf.copy()
+
+        lu_candidates = []
+        raw_tags = []
+
+        for _, row in osm.iterrows():
+            matched_class = None
+            matched_raw = None
+            for key in _POI_TAG_PRIORITY:
+                if key not in osm.columns:
+                    continue
+                val = row.get(key)
+                if val is None or (isinstance(val, float) and pd.isna(val)):
+                    continue
+                val = str(val).strip()
+                entry = OSM_TAG_CLASS.get((key, val)) or OSM_TAG_CLASS.get((key, "*"))
+                if entry:
+                    matched_class = entry["lu_class"]
+                    matched_raw = val
+                    break
+            lu_candidates.append(matched_class)
+            raw_tags.append(matched_raw)
+
+        osm["source"] = "osm_poi"
+        osm["lu_class_candidate"] = lu_candidates
+        osm["raw_tag"] = raw_tags
+        osm["confidence"] = None
+        osm["name"] = osm["name"] if "name" in osm.columns else None
+
+        for col in _SHARED_COLS:
+            if col not in osm.columns:
+                osm[col] = None
+        parts.append(osm[_SHARED_COLS])
+
+    # ------------------------------------------------------------------
+    # Overture rows
+    # ------------------------------------------------------------------
+    if not unmatched_overture_gdf.empty:
+        ov = unmatched_overture_gdf.copy()
+
+        lu_candidates_ov = []
+        for _, row in ov.iterrows():
+            cat = row.get("category_primary") if "category_primary" in ov.columns else None
+            if cat is None or (isinstance(cat, float) and pd.isna(cat)):
+                lu_candidates_ov.append(None)
+            else:
+                l0 = str(cat).split(".")[0]
+                lu_candidates_ov.append(OVERTURE_L0_CLASS.get(l0))
+
+        ov["source"] = "overture"
+        ov["lu_class_candidate"] = lu_candidates_ov
+        ov["raw_tag"] = ov["category_primary"] if "category_primary" in ov.columns else None
+        ov["name"] = ov["name"] if "name" in ov.columns else None
+        ov["confidence"] = pd.to_numeric(
+            ov["confidence"] if "confidence" in ov.columns else None,
+            errors="coerce",
+        )
+
+        for col in _SHARED_COLS:
+            if col not in ov.columns:
+                ov[col] = None
+        parts.append(ov[_SHARED_COLS])
+
+    # ------------------------------------------------------------------
+    # Concatenate and write
+    # ------------------------------------------------------------------
+    if not parts:
+        print(f"  [unmatched_pois] No unmatched POIs — layer not written.")
+        return
+
+    combined = gpd.GeoDataFrame(pd.concat(parts, ignore_index=True), geometry="geometry", crs="EPSG:4326")
+    combined = combined[combined.geometry.notna() & ~combined.geometry.is_empty].copy()
+
+    if combined.empty:
+        print(f"  [unmatched_pois] No valid geometries after filtering — layer not written.")
+        return
+
+    OUTPUT_GPKG.parent.mkdir(parents=True, exist_ok=True)
+    if OUTPUT_GPKG.exists():
+        _drop_gpkg_layer(OUTPUT_GPKG, _UNMATCHED_POIS_LAYER_NAME)
+
+    combined.to_file(str(OUTPUT_GPKG), driver="GPKG", layer=_UNMATCHED_POIS_LAYER_NAME, mode="a")
+
+    n_osm = int((combined["source"] == "osm_poi").sum())
+    n_ov  = int((combined["source"] == "overture").sum())
+    print(
+        f"  Written {len(combined):,} unmatched POIs → "
+        f"{OUTPUT_GPKG.name} (layer: {_UNMATCHED_POIS_LAYER_NAME})  "
+        f"[osm_poi: {n_osm:,}  overture: {n_ov:,}]"
+    )

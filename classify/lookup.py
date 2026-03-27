@@ -45,24 +45,28 @@ def _e(lu_class: str, lu_subclass: Optional[str], lu_confidence: str) -> _Entry:
 OSM_TAG_CLASS: Dict[Tuple[str, str], _Entry] = {
 
     # -----------------------------------------------------------------------
-    # RESIDENTIAL
+    # RESIDENTIAL — four subclasses
     # -----------------------------------------------------------------------
-    ("building", "residential"):      _e("Residential", None,             "medium"),
-    ("building", "house"):            _e("Residential", None,             "medium"),
-    ("building", "detached"):         _e("Residential", None,             "medium"),
-    ("building", "semi-detached"):    _e("Residential", None,             "medium"),
-    ("building", "terrace"):          _e("Residential", None,             "medium"),
-    ("building", "bungalow"):         _e("Residential", None,             "medium"),
-    ("building", "villa"):            _e("Residential", None,             "medium"),
-    ("building", "hut"):              _e("Residential", "Traditional",    "medium"),
-    ("building", "cabin"):            _e("Residential", "Traditional",    "low"),
-    ("building", "farm"):             _e("Residential", "Traditional",    "low"),
-    ("building", "farm_auxiliary"):   _e("Residential", "Traditional",    "low"),
-    ("building", "apartments"):       _e("Residential", "Multi-family",   "high"),
-    ("building", "dormitory"):        _e("Residential", "Multi-family",   "high"),
-    ("building", "block_of_flats"):   _e("Residential", "Multi-family",   "high"),
-    ("building", "static_caravan"):   _e("Residential", "Temporary",      "medium"),
-    ("landuse", "residential"):       _e("Residential", None,             "low"),
+    # Traditional / informal structures
+    ("building", "hut"):              _e("Residential-Traditional",   None, "medium"),
+    ("building", "static_caravan"):   _e("Residential-Traditional",   None, "medium"),
+    # Single-family detached / low-density
+    ("building", "house"):            _e("Residential-Single_Family", None, "medium"),
+    ("building", "detached"):         _e("Residential-Single_Family", None, "high"),
+    ("building", "semidetached_house"): _e("Residential-Single_Family", None, "high"),
+    ("building", "bungalow"):         _e("Residential-Single_Family", None, "medium"),
+    # OSM building=residential is ambiguous; Single_Family is the default
+    # in absence of other signals
+    ("building", "residential"):      _e("Residential-Single_Family", None, "low"),
+    # Multi-family / high-density
+    ("building", "apartments"):       _e("Residential-Multi_Family",  None, "high"),
+    ("building", "dormitory"):        _e("Residential-Multi_Family",  None, "high"),
+    # Formal / terraced (planned row housing)
+    ("building", "terrace"):          _e("Residential-Formal",        None, "medium"),
+    # Residential zone — Residential-Formal cannot be distinguished from
+    # Residential-Single_Family via OSM landuse tags alone;
+    # morphological analysis required
+    ("landuse", "residential"):       _e("Residential-Single_Family", None, "low"),
 
     # -----------------------------------------------------------------------
     # COMMERCIAL
@@ -212,39 +216,14 @@ OSM_TAG_CLASS: Dict[Tuple[str, str], _Entry] = {
     ("building", "shelter"):           _e("Temporary Housing", None,      "medium"),
 
     # -----------------------------------------------------------------------
-    # OPEN SPACE / ENVIRONMENTAL
+    # OPEN SPACE / ENVIRONMENTAL — intentionally omitted
     # -----------------------------------------------------------------------
-    ("landuse", "grass"):              _e("Open Space/Environmental", None,            "high"),
-    ("landuse", "meadow"):             _e("Open Space/Environmental", None,            "high"),
-    ("landuse", "forest"):             _e("Open Space/Environmental", "Vegetation",    "high"),
-    ("landuse", "farmland"):           _e("Open Space/Environmental", "Agricultural",  "medium"),
-    ("landuse", "farmyard"):           _e("Open Space/Environmental", "Agricultural",  "medium"),
-    ("landuse", "orchard"):            _e("Open Space/Environmental", "Agricultural",  "medium"),
-    ("landuse", "allotments"):         _e("Open Space/Environmental", "Agricultural",  "medium"),
-    ("landuse", "garden"):             _e("Open Space/Environmental", None,            "medium"),
-    ("landuse", "recreation_ground"):  _e("Open Space/Environmental", "Recreation",   "high"),
-    ("landuse", "village_green"):      _e("Open Space/Environmental", None,            "medium"),
-    ("landuse", "greenfield"):         _e("Open Space/Environmental", None,            "low"),
-    ("leisure", "park"):               _e("Open Space/Environmental", "Recreation",   "high"),
-    ("leisure", "pitch"):              _e("Open Space/Environmental", "Recreation",   "high"),
-    ("leisure", "playground"):         _e("Open Space/Environmental", "Recreation",   "high"),
-    ("leisure", "garden"):             _e("Open Space/Environmental", None,            "high"),
-    ("leisure", "sports_centre"):      _e("Open Space/Environmental", "Recreation",   "high"),
-    ("leisure", "stadium"):            _e("Open Space/Environmental", "Recreation",   "high"),
-    ("leisure", "swimming_pool"):      _e("Open Space/Environmental", "Recreation",   "high"),
-    ("leisure", "golf_course"):        _e("Open Space/Environmental", "Recreation",   "high"),
-    ("leisure", "nature_reserve"):     _e("Open Space/Environmental", "Vegetation",   "high"),
-    ("natural", "water"):              _e("Open Space/Environmental", "Water",         "high"),
-    ("natural", "wetland"):            _e("Open Space/Environmental", "Wetland",       "high"),
-    ("natural", "wood"):               _e("Open Space/Environmental", "Vegetation",    "high"),
-    ("natural", "scrub"):              _e("Open Space/Environmental", "Vegetation",    "medium"),
-    ("natural", "heath"):              _e("Open Space/Environmental", "Vegetation",    "medium"),
-    ("natural", "grassland"):          _e("Open Space/Environmental", None,            "medium"),
-    ("natural", "sand"):               _e("Open Space/Environmental", None,            "medium"),
-    ("natural", "beach"):              _e("Open Space/Environmental", None,            "medium"),
-    ("waterway", "riverbank"):         _e("Open Space/Environmental", "Water",         "high"),
-    ("landuse", "basin"):              _e("Open Space/Environmental", "Water",         "high"),
-    ("landuse", "reservoir"):          _e("Open Space/Environmental", "Water",         "high"),
+    # Open space and environmental land-cover types (landuse=grass/forest/
+    # farmland, leisure=park/pitch, natural=wood/water, etc.) are handled
+    # as a separate polygon layer in the pipeline and must not be assigned
+    # to individual building footprints.  Assigning open-space classes to
+    # buildings produces systematic mislabelling because such tags describe
+    # the surrounding land cover, not the function of the structure itself.
 }
 
 # ---------------------------------------------------------------------------
@@ -253,15 +232,29 @@ OSM_TAG_CLASS: Dict[Tuple[str, str], _Entry] = {
 # A frozenset of two class names whose co-occurrence on a single building
 # triggers Mixed Use labelling. The assign module checks whether any pair of
 # resolved classes appears in this list.
+#
+# Each of the four residential subclasses is paired explicitly with
+# Commercial and Public/Institutional — the two non-residential classes
+# most commonly found in genuine mixed-use structures.
 
-MIXED_USE_TRIGGER_PAIRS: List[FrozenSet[str]] = [
-    frozenset({"Residential", "Commercial"}),
-    frozenset({"Residential", "Public/Institutional"}),
-    frozenset({"Commercial", "Public/Institutional"}),
-    frozenset({"Residential", "Industrial"}),
-    frozenset({"Commercial", "Industrial"}),
-    frozenset({"Residential", "Transport"}),
+_RESIDENTIAL_SUBCLASSES = [
+    "Residential-Traditional",
+    "Residential-Single_Family",
+    "Residential-Multi_Family",
+    "Residential-Formal",
 ]
+
+MIXED_USE_TRIGGER_PAIRS: List[FrozenSet[str]] = (
+    # Residential subclass × Commercial
+    [frozenset({r, "Commercial"}) for r in _RESIDENTIAL_SUBCLASSES]
+    # Residential subclass × Public/Institutional
+    + [frozenset({r, "Public/Institutional"}) for r in _RESIDENTIAL_SUBCLASSES]
+    # Non-residential cross-class pairs
+    + [
+        frozenset({"Commercial", "Public/Institutional"}),
+        frozenset({"Commercial", "Industrial"}),
+    ]
+)
 
 # ---------------------------------------------------------------------------
 # OVERTURE_L0_CLASS
@@ -270,7 +263,9 @@ MIXED_USE_TRIGGER_PAIRS: List[FrozenSet[str]] = [
 # The L0 value is obtained by splitting category_primary on "." and taking [0].
 
 OVERTURE_L0_CLASS: Dict[str, str] = {
-    "accommodation":          "Residential",
+    # Accommodation (hotels, guesthouses) is classified as Commercial;
+    # residential use of these facilities is not assumed.
+    "accommodation":          "Commercial",
     "food_and_drink":         "Commercial",
     "retail":                 "Commercial",
     "civic_and_social":       "Public/Institutional",
@@ -280,14 +275,13 @@ OVERTURE_L0_CLASS: Dict[str, str] = {
     "arts_and_entertainment": "Commercial",
     "government_and_community": "Public/Institutional",
     "religious":              "Public/Institutional",
-    "natural_and_geographic": "Open Space/Environmental",
-    "landforms":              "Open Space/Environmental",
     "financial_services":     "Commercial",
     "business_to_business":   "Commercial",
     "professional_services":  "Commercial",
     "mass_media_and_information": "Commercial",
-    "activity":               "Open Space/Environmental",
-    "landmarks_and_outdoors": "Open Space/Environmental",
+    # natural_and_geographic, landforms, activity, landmarks_and_outdoors
+    # are intentionally omitted: open-space categories are not assigned to
+    # individual building footprints (see OSM_TAG_CLASS comment above).
 }
 
 # ---------------------------------------------------------------------------

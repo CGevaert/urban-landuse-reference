@@ -471,4 +471,37 @@ def run_joins(layers_dict: dict) -> gpd.GeoDataFrame:
     gdf = gdf.to_crs("EPSG:4326")
 
     _print_summary(gdf)
-    return gdf
+
+    # ------------------------------------------------------------------
+    # Collect unmatched POI subsets for export
+    # ------------------------------------------------------------------
+    matched_overture_indices: set = set()
+    for matches in overture_by_fp.values():
+        for row in matches:
+            matched_overture_indices.add(row.name)
+
+    matched_osm_poi_indices: set = set()
+    for matches in osm_poi_by_fp.values():
+        for row in matches:
+            matched_osm_poi_indices.add(row.name)
+
+    if overture_places.empty:
+        unmatched_overture = gpd.GeoDataFrame()
+    else:
+        unmatched_overture = overture_places[
+            ~overture_places.index.isin(matched_overture_indices)
+        ].to_crs("EPSG:4326")
+
+    if osm_pois.empty:
+        unmatched_osm_pois = gpd.GeoDataFrame()
+    else:
+        unmatched_osm_pois = osm_pois[
+            ~osm_pois.index.isin(matched_osm_poi_indices)
+        ].to_crs("EPSG:4326")
+
+    print(
+        f"  Unmatched Overture places: {len(unmatched_overture):,}  |  "
+        f"Unmatched OSM POIs: {len(unmatched_osm_pois):,}"
+    )
+
+    return gdf, unmatched_osm_pois, unmatched_overture

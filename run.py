@@ -172,7 +172,7 @@ def main(argv=None) -> None:
     from acquire.osm import fetch_osm_buildings, fetch_osm_landuse, fetch_osm_pois
     from acquire.overture import fetch_overture_places
     from acquire.unhcr import build_site_polygons, fetch_cccm_sites
-    from export import export_reference_dataset
+    from export import export_open_space_layer, export_reference_dataset, export_unmatched_pois
     from join import run_joins
     from preprocess.align import align_layers
     from validate import (
@@ -251,7 +251,9 @@ def main(argv=None) -> None:
     # ------------------------------------------------------------------
     # Step 5 — Spatial joins + label assignment
     # ------------------------------------------------------------------
-    labelled = _step("Spatial joins + label assignment", run_joins, layers)
+    labelled, unmatched_osm_pois, unmatched_overture = _step(
+        "Spatial joins + label assignment", run_joins, layers
+    )
 
     # ------------------------------------------------------------------
     # Checkpoints 2 & 3 — Validate joins and spatial distribution
@@ -267,9 +269,19 @@ def main(argv=None) -> None:
             print(f"\n[WARN] {_val_name} raised an unexpected error and was skipped: {_val_exc}")
 
     # ------------------------------------------------------------------
-    # Step 6 — Export
+    # Step 6 — Export reference buildings
     # ------------------------------------------------------------------
     _step("Export reference dataset", export_reference_dataset, labelled)
+
+    # ------------------------------------------------------------------
+    # Step 7 — Export open-space polygon layer
+    # ------------------------------------------------------------------
+    _step("Export open-space layer", export_open_space_layer, layers)
+
+    # ------------------------------------------------------------------
+    # Step 8 — Export unmatched POIs (not associated with any footprint)
+    # ------------------------------------------------------------------
+    _step("Export unmatched POIs", export_unmatched_pois, unmatched_osm_pois, unmatched_overture)
 
     # ------------------------------------------------------------------
     # Done
