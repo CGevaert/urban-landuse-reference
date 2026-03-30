@@ -18,7 +18,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from config import AOI_GEOM, CRS_GEO, OUTPUT_GPKG  # noqa: E402
 from acquire.osm import _drop_gpkg_layer  # noqa: E402
-from classify.lookup import OSM_TAG_CLASS, OVERTURE_L0_CLASS  # noqa: E402
+from classify.lookup import LU_CODE_MAP, OSM_TAG_CLASS, OVERTURE_L0_CLASS  # noqa: E402
+from classify.open_space import OS_CLASS_MAP, OS_FILTER, build_open_space_gdf  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Exact output column order
@@ -26,6 +27,7 @@ from classify.lookup import OSM_TAG_CLASS, OVERTURE_L0_CLASS  # noqa: E402
 
 _OUTPUT_COLUMNS = [
     "footprint_id",
+    "lu_code",
     "geometry",
     "lu_class",
     "lu_subclass",
@@ -43,6 +45,7 @@ _OUTPUT_COLUMNS = [
     "cccm_site_type",
     "cccm_geometry_source",
     "osm_landuse",
+    "os_override_tag",
 ]
 
 # Candidate column names that may hold the original footprint ID
@@ -61,44 +64,7 @@ _UNMATCHED_POIS_LAYER_NAME = "unmatched_pois"
 # Tag key priority order used to resolve lu_class_candidate for OSM POIs
 _POI_TAG_PRIORITY = ["amenity", "shop", "office", "leisure", "public_transport"]
 
-# Tag values that qualify a landuse polygon as open space, keyed by OSM tag.
-# Priority when a row matches multiple keys: natural > leisure > landuse.
-_OS_FILTER: dict = {
-    "landuse": {
-        "grass", "meadow", "forest", "cemetery", "recreation_ground",
-        "village_green", "allotments", "orchard", "farmland", "farmyard",
-        "basin", "reservoir", "flowerbed",
-    },
-    "leisure": {
-        "park", "pitch", "playground", "nature_reserve", "garden",
-        "common", "dog_park",
-    },
-    "natural": {
-        "water", "wetland", "wood", "scrub", "heath", "grassland",
-        "beach", "sand",
-    },
-}
-
-# Mapping from individual tag values to the five os_class categories.
-_OS_CLASS_MAP: dict = {
-    # Vegetation
-    "grass": "Vegetation", "meadow": "Vegetation", "forest": "Vegetation",
-    "flowerbed": "Vegetation", "allotments": "Vegetation",
-    "orchard": "Vegetation", "nature_reserve": "Vegetation",
-    "garden": "Vegetation", "wood": "Vegetation", "scrub": "Vegetation",
-    "heath": "Vegetation", "grassland": "Vegetation", "sand": "Vegetation",
-    # Water
-    "water": "Water", "wetland": "Water", "basin": "Water",
-    "reservoir": "Water",
-    # Recreation
-    "recreation_ground": "Recreation", "village_green": "Recreation",
-    "park": "Recreation", "pitch": "Recreation", "playground": "Recreation",
-    "common": "Recreation", "dog_park": "Recreation", "beach": "Recreation",
-    # Agriculture
-    "farmland": "Agriculture", "farmyard": "Agriculture",
-    # Cemetery
-    "cemetery": "Cemetery",
-}
+# OS_FILTER and OS_CLASS_MAP live in classify/open_space.py; imported above.
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +163,11 @@ def _print_final_summary(gdf: gpd.GeoDataFrame, n_unmatched: int = 0) -> None:
     print(f"\n  reference_buildings (labelled):   {n:>7,}")
     print(f"  unmatched_points    (unlabelled): {n_unmatched:>7,}")
 
+    print("\n  By lu_code:")
+    for code, cnt in gdf["lu_code"].fillna("—").value_counts().sort_index().items():
+        pct = 100 * cnt / n if n else 0
+        print(f"    {code:<6}  {cnt:>7,}  ({pct:.1f} %)")
+
     print("\n  By lu_class:")
     for cls, cnt in gdf["lu_class"].fillna("(unclassified)").value_counts().items():
         pct = 100 * cnt / n if n else 0
@@ -263,6 +234,9 @@ def export_reference_dataset(labelled_gdf: gpd.GeoDataFrame) -> None:
     # Rename osm_landuse_value → osm_landuse to match schema
     if "osm_landuse_value" in gdf.columns and "osm_landuse" not in gdf.columns:
         gdf = gdf.rename(columns={"osm_landuse_value": "osm_landuse"})
+
+    # Derive lu_code from lu_class via LU_CODE_MAP
+    gdf["lu_code"] = gdf["lu_class"].map(LU_CODE_MAP)
 
     # Ensure every required column exists (fill missing with None)
     for col in _OUTPUT_COLUMNS:
@@ -362,53 +336,15 @@ def export_open_space_layer(layers_dict: dict) -> None:
         Output of :func:`preprocess.align.align_layers`.  All GeoDataFrames
         must be in CRS_PROJ (EPSG:32636).
     """
-    import geopandas as gpd
-    import pandas as pd
-
-    raw = layers_dict.get("osm_landuse", gpd.GeoDataFrame())
-    if raw.empty:
-        print("  [open_space] osm_landuse is empty — layer not written.")
-        return
-
-    # Reproject to EPSG:4326 for clipping against AOI_GEOM and final storage
-    gdf = raw.to_crs(CRS_GEO).copy()
-
-    # ------------------------------------------------------------------
-    # Resolve which tag key/value each row matches and whether it qualifies.
-    # Priority: natural > leisure > landuse (when multiple keys are present).
-    # ------------------------------------------------------------------
-    tag_keys: list = []
-    tag_vals: list = []
-    keep: list = []
-
-    for _, row in gdf.iterrows():
-        matched_key = None
-        matched_val = None
-
-        for key in ("natural", "leisure", "landuse"):
-            if key not in gdf.columns:
-                continue
-            val = row.get(key)
-            if val is None or (isinstance(val, float) and pd.isna(val)):
-                continue
-            val = str(val).strip()
-            if val in _OS_FILTER[key]:
-                matched_key = key
-                matched_val = val
-                break  # highest-priority match found
-
-        tag_keys.append(matched_key)
-        tag_vals.append(matched_val)
-        keep.append(matched_key is not None)
-
-    gdf = gdf[keep].copy()
-    gdf["osm_tag_key"] = [k for k, flag in zip(tag_keys, keep) if flag]
-    gdf["osm_tag_value"] = [v for v, flag in zip(tag_vals, keep) if flag]
-    gdf["os_class"] = gdf["osm_tag_value"].map(_OS_CLASS_MAP)
+    # Build the filtered open-space GDF using the shared helper (CRS_PROJ).
+    gdf = build_open_space_gdf(layers_dict)
 
     if gdf.empty:
-        print("  [open_space] No qualifying features found — layer not written.")
+        print("  [open_space] osm_landuse is empty or has no qualifying features — layer not written.")
         return
+
+    # Reproject to EPSG:4326 for clipping against AOI_GEOM and final storage.
+    gdf = gdf.to_crs(CRS_GEO).copy()
 
     # ------------------------------------------------------------------
     # Clip to AOI_GEOM (EPSG:4326)

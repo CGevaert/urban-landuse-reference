@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # landuse_ref — Multi-Source Reference Land-Use Dataset for Urban Areas
 
 ## 1. Overview
@@ -134,7 +133,7 @@ Polygon boundary files for CCCM sites, if available, should be placed at:
 data/input/cccm_site_boundaries.gpkg
 ```
 
-(GeoJSON and Shapefile are also accepted.) If no boundary file is present, all site extents are approximated by buffering the point location by `POINT_BUFFER_M` metres (default: 250 m).
+(GeoJSON and Shapefile are also accepted.) If no boundary file is present, all site extents are approximated by buffering the point location by `POINT_BUFFER_M` metres (default: 100 m).
 
 ---
 
@@ -169,6 +168,9 @@ python run.py \
 | `--skip-osm` | flag | No | off | Skip OSM acquisition and use cached layers from the scratch GeoPackage |
 | `--skip-overture` | flag | No | off | Skip Overture acquisition and use the cached layer from the scratch GeoPackage |
 | `--skip-cccm` | flag | No | off | Skip CCCM acquisition and use the cached layer from the scratch GeoPackage |
+| `--include-cccm` | flag | No | off | Enable CCCM/IDP site acquisition and Tier 1 classification (see note below) |
+
+> **CCCM/IDP data is excluded by default.** The pipeline does not attempt to download or use CCCM displacement-site data unless `--include-cccm` is supplied. This flag requires either a live connection to the Humanitarian Data Exchange (HDX) API, or a manually downloaded copy of the IOM DTM site assessment masterlist placed at `data/input/cccm_masterlist_manual.xlsx`. When `--include-cccm` is not set, Tier 1 labels are not assigned and the `cccm_*` provenance columns in the output will be null for all buildings.
 
 ### 7.4 Incremental re-runs
 
@@ -242,7 +244,7 @@ The pipeline includes three non-blocking validation checkpoints that run automat
 
 **Overture Maps POI sparsity.** The Overture Maps Places dataset aggregates commercial data providers including Foursquare, Meta, and Microsoft. These providers have systematically lower coverage in low-income urban areas, informal economies, and cities outside North America and Western Europe. Confidence scores are computed by Overture internally and reflect data-source agreement rather than ground-truth accuracy. The pipeline applies a minimum confidence threshold (default 0.7), but even high-confidence records may represent the formal commercial sector only. The Tier 3 classification signal should be interpreted as indicative, not comprehensive.
 
-**CCCM geometry approximation.** CCCM and IOM DTM site masterlists predominantly record site locations as a single centroid point rather than a surveyed polygon boundary. Where no boundary file is provided, the pipeline buffers this point by a fixed radius (default 250 m) to approximate the site footprint. This approximation does not account for site shape, topography, or actual extent; it will over-include buildings outside camp boundaries and may under-include buildings in large or irregularly shaped sites. Users with access to surveyed site boundaries should provide them as `data/input/cccm_site_boundaries.gpkg` to replace this approximation.
+**CCCM geometry approximation.** CCCM and IOM DTM site masterlists predominantly record site locations as a single centroid point rather than a surveyed polygon boundary. Where no boundary file is provided, the pipeline buffers this point by a fixed radius (default 100 m) to approximate the site footprint. This approximation does not account for site shape, topography, or actual extent; it will over-include buildings outside camp boundaries and may under-include buildings in large or irregularly shaped sites. Users with access to surveyed site boundaries should provide them as `data/input/cccm_site_boundaries.gpkg` to replace this approximation.
 
 **Temporal inconsistency between sources.** The three data sources are extracted at different points in time and are updated on different schedules. OSM edits are continuous; Geofabrik extracts are updated daily but the pipeline caches a downloaded PBF and does not re-download unless the cache is cleared. Overture Maps releases a new snapshot approximately monthly; the pipeline queries the latest release at run time. CCCM masterlists are updated episodically. Buildings constructed, demolished, or repurposed between data extract dates will be misclassified or absent. The `osm_last_edit` field provides a partial indicator of OSM data currency at the feature level, but no equivalent timestamp is available from Overture or CCCM.
 
@@ -273,7 +275,3 @@ This pipeline relies on data and infrastructure maintained by the following orga
 **IOM Displacement Tracking Matrix (DTM)** — Displacement site locations and attributes are sourced from the IOM DTM Site Assessment and CCCM Cluster South Sudan Site Masterlist, distributed via the Humanitarian Data Exchange (HDX). © International Organization for Migration.
 
 **OCHA / Humanitarian Data Exchange** — Displacement-related datasets are distributed through the UN OCHA Humanitarian Data Exchange platform (data.humdata.org). OCHA is not responsible for the content or analysis presented in outputs produced by this pipeline.
-=======
-# urban-landuse-reference
-Code to generate reference data for land use classification in cities. This is done by taking data from: OSM, Overture, and CCCM for refugee campls.
->>>>>>> 142125d023ae119d0cad307ff0001e4347a07104

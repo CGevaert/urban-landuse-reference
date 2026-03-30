@@ -78,6 +78,12 @@ AOI_BBOX_STR: Optional[str] = None
 AOI_BBOX_OVERPASS: Optional[tuple] = None
 """Bounding box in Overpass API format: (south, west, north, east).  Set by init()."""
 
+USE_CCCM: bool = False
+"""Whether CCCM/IDP site data acquisition and Tier 1 classification are enabled.
+Set by init() via the ``--include-cccm`` CLI flag.  Defaults to False so that
+the pipeline does not require an HDX account or network access to the CCCM
+dataset for basic city-agnostic runs."""
+
 
 # ---------------------------------------------------------------------------
 # Initialisation
@@ -88,6 +94,7 @@ def init(
     footprints_path: "str | Path",
     project_name: Optional[str] = None,
     confidence_min: float = 0.7,
+    use_cccm: bool = False,
 ) -> None:
     """
     Initialise all derived pipeline constants from the supplied AOI and
@@ -117,7 +124,7 @@ def init(
     from shapely.validation import make_valid
 
     global PROJECT_NAME, FOOTPRINTS_PATH, INPUT_DIR, SCRATCH_GPKG, OUTPUT_GPKG
-    global OVERTURE_CONFIDENCE_MIN
+    global OVERTURE_CONFIDENCE_MIN, USE_CCCM
     global AOI_GEOM, AOI_GEOM_PROJ, AOI_BBOX, AOI_BBOX_STR, AOI_BBOX_OVERPASS
 
     aoi_path = Path(aoi_path)
@@ -136,6 +143,7 @@ def init(
     PROJECT_NAME = project_name
     FOOTPRINTS_PATH = footprints_path
     OVERTURE_CONFIDENCE_MIN = confidence_min
+    USE_CCCM = use_cccm
 
     # Ensure data directories exist
     _DATA.mkdir(parents=True, exist_ok=True)
@@ -172,3 +180,4 @@ def init(
     print(f"    output:      {OUTPUT_GPKG.name}")
     print(f"    bbox (geo):  W={_minx:.4f}  S={_miny:.4f}  E={_maxx:.4f}  N={_maxy:.4f}")
     print(f"    confidence:  >= {confidence_min}")
+    print(f"    CCCM/IDP:    {'enabled (--include-cccm)' if use_cccm else 'disabled (use --include-cccm to enable)'}")

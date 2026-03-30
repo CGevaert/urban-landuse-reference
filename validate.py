@@ -19,6 +19,7 @@ from shapely.geometry import box
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+import config  # noqa: E402
 from config import AOI_GEOM, CRS_PROJ, SCRATCH_GPKG  # noqa: E402
 
 _EXPECTED_LAYERS = [
@@ -123,6 +124,12 @@ def validate_acquisition() -> Dict[str, int]:
     errors: List[str] = []
 
     for layer_name in _EXPECTED_LAYERS:
+        # cccm_sites is optional — skip the check when CCCM acquisition is disabled
+        if layer_name == "cccm_sites" and not config.USE_CCCM:
+            print(f"\n  Layer: {layer_name}")
+            print("    [SKIP] CCCM layer check disabled (--include-cccm not set).")
+            continue
+
         print(f"\n  Layer: {layer_name}")
 
         if not SCRATCH_GPKG.exists():

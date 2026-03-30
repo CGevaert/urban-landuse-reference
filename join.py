@@ -17,9 +17,11 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+import config  # noqa: E402
 from classify.assign import assign_label  # noqa: E402
 from classify.lookup import OVERTURE_PRIORITY_ORDER  # noqa: E402
 from classify.mixed_use import detect_mixed_use_from_pois  # noqa: E402
+from classify.open_space import build_open_space_gdf  # noqa: E402
 from config import CRS_PROJ  # noqa: E402
 
 _OVERTURE_ORDER_MAP = {l0: i for i, l0 in enumerate(OVERTURE_PRIORITY_ORDER)}
@@ -350,6 +352,8 @@ def _build_row(
         "cccm_geometry_source": _get(cccm_m, "geometry_source"),
         # ---- OSM landuse provenance ----
         "osm_landuse_value": _get(lu_m, "landuse"),
+        # ---- Spatial override provenance (populated in post-assignment step) ----
+        "os_override_tag": None,
     }
 
 
@@ -414,9 +418,13 @@ def run_joins(layers_dict: dict) -> gpd.GeoDataFrame:
     n = len(footprints)
     print(f"\nProcessing {n:,} building footprints…")
 
-    print("  [1/6] CCCM centroid join…")
-    cccm_by_fp = _join_cccm(footprints, cccm_sites)
-    print(f"        {len(cccm_by_fp):,} footprints matched to CCCM sites.")
+    if config.USE_CCCM and not cccm_sites.empty:
+        print("  [1/6] CCCM centroid join…")
+        cccm_by_fp = _join_cccm(footprints, cccm_sites)
+        print(f"        {len(cccm_by_fp):,} footprints matched to CCCM sites.")
+    else:
+        print("  [1/6] CCCM centroid join — skipped (--include-cccm not set).")
+        cccm_by_fp = {}
 
     print("  [2/6] OSM building overlap join (threshold = 0.30)…")
     osm_bld_by_fp = _join_osm_buildings(footprints, osm_buildings)
@@ -468,6 +476,67 @@ def run_joins(layers_dict: dict) -> gpd.GeoDataFrame:
         )
 
     gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=CRS_PROJ)
+
+    # ------------------------------------------------------------------
+    # Spatial override — Residential buildings in open-space polygons
+    #                    → Residential-Informal
+    #
+    # Informal settlements in cities like Juba frequently occupy land
+    # officially designated as open space, park, or environmental buffer
+    # zones.  Spatial co-location of a residential building centroid with
+    # an open-space polygon is used here as a proxy for informal status
+    # in the absence of morphological analysis.  The override applies only
+    # to buildings whose lu_class already starts with "Residential"; all
+    # other classes and Tier 1 (CCCM) labels are unaffected.
+    # ------------------------------------------------------------------
+    _os_gdf = build_open_space_gdf(layers_dict)
+
+    if not _os_gdf.empty:
+        _res_mask = (
+            gdf["lu_class"].notna()
+            & gdf["lu_class"].str.startswith("Residential")
+            & (gdf["lu_class"] != "Residential-Informal")
+        )
+        _res_idx = gdf.index[_res_mask]
+
+        if len(_res_idx) > 0:
+            _res_centroids = _centroids(gdf.loc[_res_idx])
+            _joined_os = gpd.sjoin(
+                _res_centroids,
+                _os_gdf[["geometry", "osm_tag_value"]],
+                how="inner",
+                predicate="within",
+            )
+            _matched_fp = _joined_os.index.unique()
+
+            if len(_matched_fp) > 0:
+                # For traceability keep the first matching open-space tag
+                _os_tag_by_fp: dict = {}
+                for fp_i, grp in _joined_os.groupby(_joined_os.index):
+                    _os_tag_by_fp[fp_i] = str(grp["osm_tag_value"].iloc[0])
+
+                gdf.loc[_matched_fp, "lu_class"] = "Residential-Informal"
+                gdf.loc[_matched_fp, "lu_tier"] = "spatial_override"
+                gdf.loc[_matched_fp, "lu_source"] = "open_space_intersection"
+                gdf.loc[_matched_fp, "lu_confidence"] = "medium"
+                if "os_override_tag" not in gdf.columns:
+                    gdf["os_override_tag"] = None
+                for fp_i, tag in _os_tag_by_fp.items():
+                    gdf.at[fp_i, "os_override_tag"] = tag
+
+                # Summary by trigger tag
+                tag_counts = _joined_os.groupby("osm_tag_value").size().sort_values(ascending=False)
+                print(
+                    f"\n  [spatial override] {len(_matched_fp):,} residential building(s) "
+                    "reclassified to Residential-Informal (open-space intersection):"
+                )
+                for tag_val, cnt in tag_counts.items():
+                    print(f"    {tag_val:<25}  {cnt:,}")
+            else:
+                print("  [spatial override] 0 residential buildings intersect open-space polygons.")
+        else:
+            print("  [spatial override] No residential buildings to check.")
+
     gdf = gdf.to_crs("EPSG:4326")
 
     _print_summary(gdf)

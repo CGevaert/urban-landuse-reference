@@ -137,6 +137,18 @@ def build_parser() -> argparse.ArgumentParser:
             "(cccm_sites) from the scratch GeoPackage."
         ),
     )
+    parser.add_argument(
+        "--include-cccm",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable CCCM/IDP site acquisition and Tier 1 classification. "
+            "Requires manually downloading the IOM DTM site assessment file "
+            "from HDX (https://data.humdata.org) and placing it at "
+            "data/input/cccm_masterlist_manual.xlsx, or a live HDX API "
+            "connection. Disabled by default."
+        ),
+    )
     return parser
 
 
@@ -157,6 +169,7 @@ def main(argv=None) -> None:
         footprints_path=args.footprints,
         project_name=args.project_name,
         confidence_min=args.confidence,
+        use_cccm=args.include_cccm,
     )
 
     from config import FOOTPRINTS_PATH, PROJECT_NAME, SCRATCH_GPKG  # noqa: E402
@@ -218,24 +231,33 @@ def main(argv=None) -> None:
         _step("Overture acquisition", fetch_overture_places)
 
     # ------------------------------------------------------------------
-    # Step 3 — CCCM acquisition + site polygon construction
+    # Step 3 — CCCM acquisition + site polygon construction (optional)
+    # Skipped unless --include-cccm is supplied.  The CCCM dataset requires
+    # either a live HDX API connection or a manually downloaded masterlist
+    # placed at data/input/cccm_masterlist_manual.xlsx.
     # ------------------------------------------------------------------
-    _CCCM_LAYERS = ["cccm_sites"]
-
-    if args.skip_cccm and _has_layers(SCRATCH_GPKG, _CCCM_LAYERS):
-        print(f"\n[SKIP] CCCM acquisition — using cached layer in {SCRATCH_GPKG.name}")
+    if not config.USE_CCCM:
+        print(
+            "\n[SKIP] CCCM acquisition — disabled (use --include-cccm to enable). "
+            "Tier 1 (CCCM) labels will not be assigned."
+        )
     else:
-        if args.skip_cccm:
-            print(
-                "\n[WARN] --skip-cccm requested but cached layer not found. "
-                "Running CCCM acquisition."
-            )
+        _CCCM_LAYERS = ["cccm_sites"]
 
-        def _run_cccm():
-            sites = fetch_cccm_sites()
-            build_site_polygons(sites)
+        if args.skip_cccm and _has_layers(SCRATCH_GPKG, _CCCM_LAYERS):
+            print(f"\n[SKIP] CCCM acquisition — using cached layer in {SCRATCH_GPKG.name}")
+        else:
+            if args.skip_cccm:
+                print(
+                    "\n[WARN] --skip-cccm requested but cached layer not found. "
+                    "Running CCCM acquisition."
+                )
 
-        _step("CCCM acquisition + site polygons", _run_cccm)
+            def _run_cccm():
+                sites = fetch_cccm_sites()
+                build_site_polygons(sites)
+
+            _step("CCCM acquisition + site polygons", _run_cccm)
 
     # ------------------------------------------------------------------
     # Checkpoint 1 — Validate acquired layers

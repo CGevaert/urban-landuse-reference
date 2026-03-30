@@ -292,6 +292,38 @@ OVERTURE_L0_CLASS: Dict[str, str] = {
 # L0 appears earliest in this list takes precedence (unless a Mixed Use
 # trigger pair applies, in which case Mixed Use is assigned instead).
 
+# ---------------------------------------------------------------------------
+# LU_CODE_MAP
+# ---------------------------------------------------------------------------
+# Maps each lu_class string to a short alphanumeric code used in the
+# lu_code column of the output reference_buildings layer.
+#
+# Note on Residential-Single_Family → RF:
+#   Single-family residential is mapped to RF (Formal) by default.
+#   Where the open-space spatial override in join.py reclassifies a building
+#   to Residential-Informal, the lu_code is automatically RI via that entry.
+
+LU_CODE_MAP: Dict[str, str] = {
+    "Residential-Informal":            "RI",
+    "Residential-Traditional":         "RT",
+    # Single-family residential is mapped to RF (Formal) by default;
+    # reclassify to RI where open space override applies (handled in join.py).
+    "Residential-Single_Family":       "RF",
+    "Residential-Multi_Family":        "RM",
+    "Residential-Formal":              "RF",
+    "Commercial":                      "CM",
+    "Mixed Use":                       "CMI",
+    "Industrial":                      "I",
+    "Public/Institutional":            "PI",  # fallback for unsubclassed
+    "Public/Institutional-Education":  "PS",
+    "Public/Institutional-Health":     "PI",
+    "Public/Institutional-Government": "PI",
+    "Public/Institutional-Religious":  "PI",
+    "Public/Institutional-Military":   "PI",
+    "Transport":                       "PT",
+    "Temporary Housing":               "T",
+}
+
 OVERTURE_PRIORITY_ORDER: List[str] = [
     "civic_and_social",
     "health_and_medical",
