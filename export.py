@@ -28,6 +28,8 @@ from classify.open_space import OS_CLASS_MAP, OS_FILTER, build_open_space_gdf  #
 _OUTPUT_COLUMNS = [
     "footprint_id",
     "lu_code",
+    "lu_main_class",
+    "lu_sub_class",
     "geometry",
     "lu_class",
     "lu_subclass",
@@ -235,8 +237,13 @@ def export_reference_dataset(labelled_gdf: gpd.GeoDataFrame) -> None:
     if "osm_landuse_value" in gdf.columns and "osm_landuse" not in gdf.columns:
         gdf = gdf.rename(columns={"osm_landuse_value": "osm_landuse"})
 
-    # Derive lu_code from lu_class via LU_CODE_MAP
-    gdf["lu_code"] = gdf["lu_class"].map(LU_CODE_MAP)
+    # Derive lu_code, lu_main_class, lu_sub_class from LU_CODE_MAP tuples.
+    # LU_CODE_MAP values are (lu_code, lu_main_class, lu_sub_class) tuples;
+    # rows whose lu_class is null or absent from the map receive all nulls.
+    _lu_tuples = gdf["lu_class"].map(LU_CODE_MAP)
+    gdf["lu_code"]       = _lu_tuples.apply(lambda t: t[0] if isinstance(t, tuple) else None)
+    gdf["lu_main_class"] = _lu_tuples.apply(lambda t: t[1] if isinstance(t, tuple) else None)
+    gdf["lu_sub_class"]  = _lu_tuples.apply(lambda t: t[2] if isinstance(t, tuple) else None)
 
     # Ensure every required column exists (fill missing with None)
     for col in _OUTPUT_COLUMNS:
@@ -361,9 +368,16 @@ def export_open_space_layer(layers_dict: dict) -> None:
         return
 
     # ------------------------------------------------------------------
-    # Select output columns and write
+    # Add fixed classification columns and write
     # ------------------------------------------------------------------
-    out_cols = ["osm_id", "geometry", "os_class", "osm_tag_key", "osm_tag_value"]
+    gdf["lu_code"]       = "O"
+    gdf["lu_main_class"] = "Open spaces"
+    gdf["lu_sub_class"]  = "Environmental/agricultural"
+
+    out_cols = [
+        "osm_id", "lu_code", "lu_main_class", "lu_sub_class",
+        "geometry", "os_class", "osm_tag_key", "osm_tag_value",
+    ]
     for col in out_cols:
         if col not in gdf.columns:
             gdf[col] = None

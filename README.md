@@ -206,10 +206,13 @@ The pipeline writes a single GeoPackage at `data/{project_name}_landuse_referenc
 | Field | Type | Description |
 |---|---|---|
 | `footprint_id` | String | Identifier carried over from the input footprints file; auto-generated UUID if no recognised ID column is present |
+| `lu_code` | String / null | Short alphanumeric class code for use in training-data schemas and cross-study comparison (see reference table below); null for Tier 5 (Unclassified) |
+| `lu_main_class` | String / null | Broad class grouping corresponding to `lu_code` (e.g. `"Residential"`, `"Public"`); null for Tier 5 |
+| `lu_sub_class` | String / null | Descriptive sub-category within `lu_main_class` (e.g. `"Traditional"`, `"School"`); null for Tier 5 |
 | `geometry` | Polygon / MultiPolygon | Building footprint geometry in EPSG:4326 |
-| `lu_class` | String / null | Primary land-use class (see Section 3); null for Tier 5 (Unclassified) |
+| `lu_class` | String / null | Full internal land-use class string (see Section 3); null for Tier 5 (Unclassified) |
 | `lu_subclass` | String / null | Secondary classification within the primary class; null when not applicable |
-| `lu_tier` | String | Tier assignment: `"1"`, `"2"`, `"2+3"`, `"3"`, `"4"`, or `"5"` |
+| `lu_tier` | String | Tier assignment: `"1"`, `"2"`, `"2+3"`, `"3"`, `"3b"`, `"3+3b"`, `"4"`, `"5"`, or `"spatial_override"` |
 | `lu_source` | String / null | Pipe-separated list of source identifiers that contributed to the label (e.g. `osm_building\|overture`) |
 | `lu_confidence` | String / null | Confidence level of the assigned class: `"high"`, `"medium"`, or `"low"` |
 | `lu_class_components` | String / null | Pipe-separated component classes for Mixed Use features (e.g. `"Residential\|Commercial"`); null for all other classes |
@@ -223,6 +226,26 @@ The pipeline writes a single GeoPackage at `data/{project_name}_landuse_referenc
 | `cccm_site_type` | String / null | Site type as reported in the CCCM masterlist (e.g. `Collective Centre`, `Spontaneous Settlement`) |
 | `cccm_geometry_source` | String / null | How the CCCM site boundary was derived: `"polygon"` (from supplied boundary file), `"point_buffered"` (centroid + buffer), or null |
 | `osm_landuse` | String / null | OSM `landuse=*` zone value if the building centroid falls within an OSM land-use polygon (Tier 4 signal; present even for buildings classified at a higher tier) |
+| `os_override_tag` | String / null | OSM tag value of the open-space polygon that triggered reclassification to `Residential-Informal` (e.g. `"grass"`, `"park"`); null for all other buildings |
+
+### 8.1 Land-Use Code Reference
+
+The following table documents all `lu_code` values produced by the pipeline.  The `lu_class (internal)` column shows the full string stored in the `lu_class` field.  The `open_space_polygons` layer uses a separate fixed code `O` not present in `reference_buildings`.
+
+| `lu_code` | `lu_main_class` | `lu_sub_class` | `lu_class` (internal) | Notes |
+|---|---|---|---|---|
+| `RTA` | Residential | Traditional | `Residential-Traditional` | Tukuls or round huts; traditional vernacular construction identified via OSM `building=hut` |
+| `RAP` | Residential | Apartment | `Residential-Multi_Family` | Multi-storey residential buildings; identified via `building=apartments` or `building=dormitory` |
+| `ROR` | Residential | Other | `Residential-Single_Family`, `Residential-Formal` | All other residential including formal planned housing and compound housing; `building=house`, `building=residential`, `building=terrace` |
+| `RI` | Residential | Informal | `Residential-Informal` | Informal settlements identified by spatial co-location with open-space or environmental buffer zones (spatial override); not assigned via tag evidence |
+| `CM` | Commercial | Market/Retail | `Commercial` | Shops and business structures; `building=commercial`, `shop=*`, `amenity=marketplace`, Overture `retail` and `food_and_drink` |
+| `CMI` | Commercial | Mixed | `Mixed Use` | Mixed residential and commercial use; assigned when two distinct classes form a recognised trigger pair on the same building |
+| `I` | Industrial | Warehouse/Factory | `Industrial` | Storage and manufacturing; `building=industrial`, `building=warehouse`, `landuse=industrial` |
+| `PS` | Public | School | `Public/Institutional-Education` | Educational facilities; `amenity=school`, `amenity=university`, `building=school` |
+| `PI` | Public | Institution | `Public/Institutional`, `Public/Institutional-Health`, `Public/Institutional-Government`, `Public/Institutional-Religious`, `Public/Institutional-Military` | Government, NGO, UN, religious, and health facilities; `amenity=hospital`, `amenity=police`, `building=government`, `amenity=place_of_worship` |
+| `PT` | Public | Transport | `Transport` | Transport infrastructure; `aeroway=*`, `amenity=bus_station`, `railway=station`, `public_transport=*` |
+| `T` | Temporary | IDP_Camp | `Temporary Housing` | Displacement and camp settings; CCCM Tier 1 sites, `amenity=refugee_camp`, `social_facility=shelter` |
+| `O` | Open spaces | Environmental/agricultural | *(open_space_polygons layer only)* | Open space, parks, environmental and agricultural land; derived from OSM `landuse`, `leisure`, and `natural` tags; written to the separate `open_space_polygons` layer, not to `reference_buildings` |
 
 ---
 

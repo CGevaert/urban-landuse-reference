@@ -295,33 +295,31 @@ OVERTURE_L0_CLASS: Dict[str, str] = {
 # ---------------------------------------------------------------------------
 # LU_CODE_MAP
 # ---------------------------------------------------------------------------
-# Maps each lu_class string to a short alphanumeric code used in the
-# lu_code column of the output reference_buildings layer.
+# Maps each internal lu_class string to a 3-tuple:
+#   (lu_code, lu_main_class, lu_sub_class)
 #
-# Note on Residential-Single_Family → RF:
-#   Single-family residential is mapped to RF (Formal) by default.
-#   Where the open-space spatial override in join.py reclassifies a building
-#   to Residential-Informal, the lu_code is automatically RI via that entry.
+# lu_code       — short alphanumeric code used as the primary label in
+#                 outputs and in external training-data schemas.
+# lu_main_class — broad grouping for display and cross-study comparison.
+# lu_sub_class  — descriptive sub-category within lu_main_class.
 
-LU_CODE_MAP: Dict[str, str] = {
-    "Residential-Informal":            "RI",
-    "Residential-Traditional":         "RT",
-    # Single-family residential is mapped to RF (Formal) by default;
-    # reclassify to RI where open space override applies (handled in join.py).
-    "Residential-Single_Family":       "RF",
-    "Residential-Multi_Family":        "RM",
-    "Residential-Formal":              "RF",
-    "Commercial":                      "CM",
-    "Mixed Use":                       "CMI",
-    "Industrial":                      "I",
-    "Public/Institutional":            "PI",  # fallback for unsubclassed
-    "Public/Institutional-Education":  "PS",
-    "Public/Institutional-Health":     "PI",
-    "Public/Institutional-Government": "PI",
-    "Public/Institutional-Religious":  "PI",
-    "Public/Institutional-Military":   "PI",
-    "Transport":                       "PT",
-    "Temporary Housing":               "T",
+LU_CODE_MAP: Dict[str, Tuple[str, str, str]] = {
+    "Residential-Traditional":         ("RTA", "Residential", "Traditional"),
+    "Residential-Multi_Family":        ("RAP", "Residential", "Apartment"),
+    "Residential-Single_Family":       ("ROR", "Residential", "Other"),
+    "Residential-Formal":              ("ROR", "Residential", "Other"),
+    "Residential-Informal":            ("RI",  "Residential", "Informal"),
+    "Commercial":                      ("CM",  "Commercial",  "Market/Retail"),
+    "Mixed Use":                       ("CMI", "Commercial",  "Mixed"),
+    "Industrial":                      ("I",   "Industrial",  "Warehouse/Factory"),
+    "Public/Institutional-Education":  ("PS",  "Public",      "School"),
+    "Public/Institutional-Health":     ("PI",  "Public",      "Institution"),
+    "Public/Institutional-Government": ("PI",  "Public",      "Institution"),
+    "Public/Institutional-Religious":  ("PI",  "Public",      "Institution"),
+    "Public/Institutional-Military":   ("PI",  "Public",      "Institution"),
+    "Public/Institutional":            ("PI",  "Public",      "Institution"),
+    "Transport":                       ("PT",  "Public",      "Transport"),
+    "Temporary Housing":               ("T",   "Temporary",   "IDP_Camp"),
 }
 
 OVERTURE_PRIORITY_ORDER: List[str] = [
