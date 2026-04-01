@@ -35,17 +35,22 @@ Labels are assigned through a five-tier priority hierarchy. A higher tier is onl
 
 ### 3.2 Classification Table
 
-| lu_class | Example lu_subclass values | Primary assignment source | lu_confidence |
-|---|---|---|---|
-| Residential | *(none)*, Traditional, Multi-family, Temporary | OSM `building=residential/house/hut/apartments`, `landuse=residential` zone | high / medium / low |
-| Commercial | Retail, Market, Finance, Hospitality, Food & Drink, Service, Entertainment | OSM `building=commercial/retail`, `shop=*`, `office=*`, `amenity=restaurant`, etc.; Overture `food_and_drink`, `retail`, `financial_services` | high / low (zone) |
-| Industrial | Storage, Manufacturing, Utility, Extractive, Waste | OSM `building=industrial/warehouse/factory`, `landuse=industrial` | high / medium / low |
-| Public/Institutional | Education, Health, Religious, Government, Community, Military, Cemetery | OSM `amenity=school/hospital/place_of_worship/police`, `building=government`, `landuse=institutional`; Overture `civic_and_social`, `health_and_medical`, `education` | high / medium / low |
-| Transport | Airport, Road, Rail, Water | OSM `aeroway=*`, `amenity=bus_station`, `railway=station`, `public_transport=*`; Overture `transportation` | high / medium |
-| Temporary Housing | *(none)* | OSM `amenity=refugee_camp`, `social_facility=shelter`; CCCM site boundary (Tier 1) | high / medium / low |
-| Open Space/Environmental | Vegetation, Agricultural, Recreation, Water, Wetland | OSM `landuse=grass/forest/farmland`, `leisure=park/pitch`, `natural=wood/water` | high / medium |
-| Mixed Use | *(pipe-separated component classes)* | Co-occurrence of Residential + Commercial, or other trigger pair (see `classify/lookup.py`) | medium |
-| Unclassified | — | No source evidence; includes buildings with `building=yes` only | — |
+The following table documents all `lu_code` values produced by the pipeline.  The `lu_class (internal)` column shows the full string stored in the `lu_class` field.  The `open_space_polygons` layer uses a separate fixed code `O` not present in `reference_buildings`.
+
+| `lu_code` | `lu_main_class` | `lu_sub_class` | `lu_class` (internal) | Notes |
+|---|---|---|---|---|
+| `RTA` | Residential | Traditional | `Residential-Traditional` | Tukuls or round huts; traditional vernacular construction identified via OSM `building=hut` |
+| `RAP` | Residential | Apartment | `Residential-Multi_Family` | Multi-storey residential buildings; identified via `building=apartments` or `building=dormitory` |
+| `ROR` | Residential | Other | `Residential-Single_Family`, `Residential-Formal` | All other residential including formal planned housing and compound housing; `building=house`, `building=residential`, `building=terrace` |
+| `RI` | Residential | Informal | `Residential-Informal` | Informal settlements identified by spatial co-location with open-space or environmental buffer zones (spatial override); not assigned via tag evidence |
+| `CM` | Commercial | Market/Retail | `Commercial` | Shops and business structures; `building=commercial`, `shop=*`, `amenity=marketplace`, Overture `retail` and `food_and_drink` |
+| `CMI` | Commercial | Mixed | `Mixed Use` | Mixed residential and commercial use; assigned when two distinct classes form a recognised trigger pair on the same building |
+| `I` | Industrial | Warehouse/Factory | `Industrial` | Storage and manufacturing; `building=industrial`, `building=warehouse`, `landuse=industrial` |
+| `PS` | Public | School | `Public/Institutional-Education` | Educational facilities; `amenity=school`, `amenity=university`, `building=school` |
+| `PI` | Public | Institution | `Public/Institutional`, `Public/Institutional-Health`, `Public/Institutional-Government`, `Public/Institutional-Religious`, `Public/Institutional-Military` | Government, NGO, UN, religious, and health facilities; `amenity=hospital`, `amenity=police`, `building=government`, `amenity=place_of_worship` |
+| `PT` | Public | Transport | `Transport` | Transport infrastructure; `aeroway=*`, `amenity=bus_station`, `railway=station`, `public_transport=*` |
+| `T` | Temporary | IDP_Camp | `Temporary Housing` | Displacement and camp settings; CCCM Tier 1 sites, `amenity=refugee_camp`, `social_facility=shelter` |
+| `O` | Open spaces | Environmental/agricultural | *(open_space_polygons layer only)* | Open space, parks, environmental and agricultural land; derived from OSM `landuse`, `leisure`, and `natural` tags; written to the separate `open_space_polygons` layer, not to `reference_buildings` |
 
 Mixed Use is assigned when a building footprint accumulates evidence from two distinct classes that form a recognised trigger pair (e.g. Residential + Commercial). The component classes are preserved in the `lu_class_components` field. Mixed Use is also flagged via a supplementary POI signal (`lu_mixed_use_poi_signal`) when an OSM POI node lies within 5 m of the building exterior and implies a different class from the building tag.
 
@@ -227,25 +232,6 @@ The pipeline writes a single GeoPackage at `data/{project_name}_landuse_referenc
 | `cccm_geometry_source` | String / null | How the CCCM site boundary was derived: `"polygon"` (from supplied boundary file), `"point_buffered"` (centroid + buffer), or null |
 | `osm_landuse` | String / null | OSM `landuse=*` zone value if the building centroid falls within an OSM land-use polygon (Tier 4 signal; present even for buildings classified at a higher tier) |
 | `os_override_tag` | String / null | OSM tag value of the open-space polygon that triggered reclassification to `Residential-Informal` (e.g. `"grass"`, `"park"`); null for all other buildings |
-
-### 8.1 Land-Use Code Reference
-
-The following table documents all `lu_code` values produced by the pipeline.  The `lu_class (internal)` column shows the full string stored in the `lu_class` field.  The `open_space_polygons` layer uses a separate fixed code `O` not present in `reference_buildings`.
-
-| `lu_code` | `lu_main_class` | `lu_sub_class` | `lu_class` (internal) | Notes |
-|---|---|---|---|---|
-| `RTA` | Residential | Traditional | `Residential-Traditional` | Tukuls or round huts; traditional vernacular construction identified via OSM `building=hut` |
-| `RAP` | Residential | Apartment | `Residential-Multi_Family` | Multi-storey residential buildings; identified via `building=apartments` or `building=dormitory` |
-| `ROR` | Residential | Other | `Residential-Single_Family`, `Residential-Formal` | All other residential including formal planned housing and compound housing; `building=house`, `building=residential`, `building=terrace` |
-| `RI` | Residential | Informal | `Residential-Informal` | Informal settlements identified by spatial co-location with open-space or environmental buffer zones (spatial override); not assigned via tag evidence |
-| `CM` | Commercial | Market/Retail | `Commercial` | Shops and business structures; `building=commercial`, `shop=*`, `amenity=marketplace`, Overture `retail` and `food_and_drink` |
-| `CMI` | Commercial | Mixed | `Mixed Use` | Mixed residential and commercial use; assigned when two distinct classes form a recognised trigger pair on the same building |
-| `I` | Industrial | Warehouse/Factory | `Industrial` | Storage and manufacturing; `building=industrial`, `building=warehouse`, `landuse=industrial` |
-| `PS` | Public | School | `Public/Institutional-Education` | Educational facilities; `amenity=school`, `amenity=university`, `building=school` |
-| `PI` | Public | Institution | `Public/Institutional`, `Public/Institutional-Health`, `Public/Institutional-Government`, `Public/Institutional-Religious`, `Public/Institutional-Military` | Government, NGO, UN, religious, and health facilities; `amenity=hospital`, `amenity=police`, `building=government`, `amenity=place_of_worship` |
-| `PT` | Public | Transport | `Transport` | Transport infrastructure; `aeroway=*`, `amenity=bus_station`, `railway=station`, `public_transport=*` |
-| `T` | Temporary | IDP_Camp | `Temporary Housing` | Displacement and camp settings; CCCM Tier 1 sites, `amenity=refugee_camp`, `social_facility=shelter` |
-| `O` | Open spaces | Environmental/agricultural | *(open_space_polygons layer only)* | Open space, parks, environmental and agricultural land; derived from OSM `landuse`, `leisure`, and `natural` tags; written to the separate `open_space_polygons` layer, not to `reference_buildings` |
 
 ---
 
