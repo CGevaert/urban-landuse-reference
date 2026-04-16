@@ -588,9 +588,28 @@ def merge_building_footprints(
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    import datetime
     import time
 
     _DIVIDER = "─" * 60
+
+    class _Tee:
+        """Write to both the original stdout and a log file simultaneously."""
+
+        def __init__(self, log_path: Path):
+            self._file = open(log_path, "w", encoding="utf-8")
+            self._stdout = sys.stdout
+
+        def write(self, text: str) -> None:
+            self._stdout.write(text)
+            self._file.write(text)
+
+        def flush(self) -> None:
+            self._stdout.flush()
+            self._file.flush()
+
+        def close(self) -> None:
+            self._file.close()
 
     parser = argparse.ArgumentParser(
         prog="merge_footprints.py",
@@ -700,29 +719,49 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # Set up log file next to the output GeoPackage
+    _output_path = Path(args.output)
+    _output_path.parent.mkdir(parents=True, exist_ok=True)
+    _timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    _log_path = _output_path.parent / f"{_output_path.stem}_{_timestamp}.log"
+    _tee = _Tee(_log_path)
+    sys.stdout = _tee
+
     t_start = time.perf_counter()
     print(_DIVIDER)
     print("  merge_footprints.py")
+    print(f"  Log: {_log_path}")
     print(_DIVIDER)
 
-    merge_building_footprints(
-        path_base=args.path_base,
-        path_update=args.path_update,
-        aoi_path=args.aoi,
-        output_path=args.output,
-        min_area_m2=args.min_area_m2,
-        overlap_threshold=args.overlap_threshold,
-        orphan_search_radius_m=args.orphan_search_radius_m,
-        cluster_eps_m=args.cluster_eps_m,
-        min_cluster_size=args.min_cluster_size,
-        max_area_m2=args.max_area_m2,
-        base_label=args.base_label,
-        update_label=args.update_label,
-    )
+    try:
+        merge_building_footprints(
+            path_base=args.path_base,
+            path_update=args.path_update,
+            aoi_path=args.aoi,
+            output_path=args.output,
+            min_area_m2=args.min_area_m2,
+            overlap_threshold=args.overlap_threshold,
+            orphan_search_radius_m=args.orphan_search_radius_m,
+            cluster_eps_m=args.cluster_eps_m,
+            min_cluster_size=args.min_cluster_size,
+            max_area_m2=args.max_area_m2,
+            base_label=args.base_label,
+            update_label=args.update_label,
+        )
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        sys.stdout = _tee._stdout
+        _tee.close()
+        raise
 
     elapsed = time.perf_counter() - t_start
     m, s = divmod(int(elapsed), 60)
     elapsed_str = f"{m}m {s}s" if m else f"{s}s"
     print(_DIVIDER)
     print(f"  Done — total elapsed: {elapsed_str}")
+    print(f"  Log saved: {_log_path}")
     print(_DIVIDER)
+
+    sys.stdout = _tee._stdout
+    _tee.close()

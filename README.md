@@ -74,6 +74,8 @@ pyrosm
 duckdb
 hdx-python-api
 pandas
+numpy
+scikit-learn
 tqdm
 requests
 ```
@@ -124,7 +126,58 @@ The pipeline now explicitly supports both GeoJSON and GeoPackage inputs for foot
 
 Recommended sources: Microsoft Building Footprints, Google Open Buildings, OSM-derived footprints (via Geofabrik or Humanitarian Data Exchange).
 
-### 6.3 CCCM site masterlist — optional manual fallback
+### 6.3 Merging footprint datasets — optional preprocessing
+
+If you have two building footprint datasets covering the same area (e.g. Google Open Buildings 2023 and a newer AI-derived dataset), `preprocess/merge_footprints.py` merges them into a single deduplicated layer before passing it to `run.py`. This step is optional — if you have a single authoritative footprint file, skip it.
+
+```bash
+python preprocess/merge_footprints.py \
+    --path-base    data/input/buildings_base.gpkg \
+    --path-update  data/input/buildings_update.gpkg \
+    --aoi          data/input/juba_aoi.geojson \
+    --output       data/input/buildings_merged.gpkg \
+    --base-label   google_2023 \
+    --update-label ai_2025
+```
+
+The script writes two layers to the output GeoPackage:
+
+| Layer | Description |
+|---|---|
+| `buildings_merged` | All merged footprints in EPSG:4326. Each row carries `bf_source` (`base` or `update_new`), `bf_dataset` (the label you supplied), `geom_flag` (null, `invalid`, `elongated`, `large`, or `overlap`), and `needs_review` |
+| `coverage_gap_zones` | Concave hull polygons around clusters of base-only orphan buildings — areas where the update dataset provides no coverage, likely indicating demolished structures or imagery gaps. Inspect these in QGIS before running the main pipeline |
+
+A timestamped log file (e.g. `buildings_merged_20250416_143022.log`) is written automatically next to the output GeoPackage.
+
+Pass the merged output to `run.py` via `--footprints`:
+
+```bash
+python run.py \
+    --aoi       data/input/juba_aoi.geojson \
+    --footprints data/input/buildings_merged.gpkg \
+    --project-name juba
+```
+
+**Key CLI flags for `merge_footprints.py`:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--path-base` | required | Base (older/reference) footprint file |
+| `--path-update` | required | Update (newer) footprint file |
+| `--aoi` | required | AOI polygon file |
+| `--output` | required | Output GeoPackage path |
+| `--base-label` | `base` | Label written to `bf_dataset` for base buildings (e.g. `google_2023`) |
+| `--update-label` | `update` | Label written to `bf_dataset` for update buildings (e.g. `ai_2025`) |
+| `--overlap-threshold` | `0.1` | Intersection/area ratio above which a base building is treated as a duplicate of an update building |
+| `--min-area-m2` | `5.0` | Drop footprints smaller than this (m²) |
+| `--max-area-m2` | `5000.0` | Flag footprints larger than this as `large` |
+| `--orphan-search-radius-m` | `30.0` | Radius (m) for identifying base buildings with no nearby update building |
+| `--cluster-eps-m` | `40.0` | DBSCAN neighbourhood radius (m) for coverage-gap cluster detection |
+| `--min-cluster-size` | `5` | Minimum orphan buildings to form a coverage-gap cluster |
+
+Requires `scikit-learn` (included in `requirements.txt`).
+
+### 6.4 CCCM site masterlist — optional manual fallback
 
 The pipeline attempts to download the CCCM South Sudan Site Masterlist automatically from HDX at runtime. If the download fails (e.g. due to network restrictions or HDX API changes), place a manually downloaded copy at:
 

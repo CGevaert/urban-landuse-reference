@@ -7,5 +7,7 @@ pyrosm
 duckdb
 hdx-python-api
 pandas
+numpy
+scikit-learn
 tqdm
 requests
