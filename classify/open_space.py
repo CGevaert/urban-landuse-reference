@@ -83,7 +83,7 @@ def build_open_space_gdf(layers_dict: dict) -> gpd.GeoDataFrame:
     ----------
     layers_dict : dict
         Output of :func:`preprocess.align.align_layers`.  Expected to contain
-        key ``"osm_landuse"`` with a GeoDataFrame in CRS_PROJ (EPSG:32636).
+        key ``"osm_landuse"`` with a GeoDataFrame in CRS_PROJ (AOI-specific projected CRS).
 
     Returns
     -------

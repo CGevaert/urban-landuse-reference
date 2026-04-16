@@ -111,6 +111,15 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="FLOAT",
         help="Minimum Overture Maps confidence threshold (0–1). Default: 0.7.",
     )
+    parser.add_argument(
+        "--osm-pbf",
+        default=None,
+        metavar="PATH_OR_URL",
+        help=(
+            "Local file path or HTTP(S) URL to an OSM PBF file. "
+            "If omitted, uses the default South Sudan Geofabrik extract."
+        ),
+    )
 
     # Skip flags
     parser.add_argument(
@@ -170,6 +179,7 @@ def main(argv=None) -> None:
         project_name=args.project_name,
         confidence_min=args.confidence,
         use_cccm=args.include_cccm,
+        osm_pbf=args.osm_pbf,
     )
 
     from config import FOOTPRINTS_PATH, PROJECT_NAME, SCRATCH_GPKG  # noqa: E402

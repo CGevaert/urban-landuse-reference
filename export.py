@@ -16,7 +16,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import AOI_GEOM, CRS_GEO, OUTPUT_GPKG  # noqa: E402
+from config import AOI_GEOM, CRS_GEO, CRS_PROJ, OUTPUT_GPKG  # noqa: E402
 from acquire.osm import _drop_gpkg_layer  # noqa: E402
 from classify.lookup import LU_CODE_MAP, OSM_TAG_CLASS, OVERTURE_L0_CLASS  # noqa: E402
 from classify.open_space import OS_CLASS_MAP, OS_FILTER, build_open_space_gdf  # noqa: E402
@@ -279,7 +279,7 @@ def export_reference_dataset(labelled_gdf: gpd.GeoDataFrame) -> None:
     # ------------------------------------------------------------------
     # Layer 2 — unmatched_points (unlabelled footprint centroids)
     #
-    # Centroid geometry is computed in the projected CRS (EPSG:32636) for
+    # Centroid geometry is computed in the projected CRS (CRS_PROJ) for
     # accuracy then reprojected back to EPSG:4326 for storage.  This layer
     # is intended for later manual review or algorithmic matching to street
     # segments or block-level units where no per-building source evidence
@@ -294,8 +294,8 @@ def export_reference_dataset(labelled_gdf: gpd.GeoDataFrame) -> None:
         ].copy()
         centroids = (
             gpd.GeoSeries(
-                unlabelled.to_crs("EPSG:32636").geometry.centroid,
-                crs="EPSG:32636",
+                unlabelled.to_crs(CRS_PROJ).geometry.centroid,
+                crs=CRS_PROJ,
             ).to_crs("EPSG:4326")
         )
         unmatched = gpd.GeoDataFrame(unmatched, geometry=centroids, crs="EPSG:4326")
@@ -341,7 +341,7 @@ def export_open_space_layer(layers_dict: dict) -> None:
     ----------
     layers_dict : dict
         Output of :func:`preprocess.align.align_layers`.  All GeoDataFrames
-        must be in CRS_PROJ (EPSG:32636).
+        must be in CRS_PROJ (the AOI-specific projected CRS).
     """
     # Build the filtered open-space GDF using the shared helper (CRS_PROJ).
     gdf = build_open_space_gdf(layers_dict)

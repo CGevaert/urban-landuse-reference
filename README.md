@@ -87,8 +87,8 @@ All dependencies are listed in `requirements.txt` and are available from PyPI.
 ### Windows
 
 ```bat
-git clone https://github.com/your-org/landuse_ref.git
-cd landuse_ref
+git clone https://github.com/your-org/juba_landuse_ref.git
+cd juba_landuse_ref
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
@@ -112,13 +112,15 @@ Two input files are required. Both must be placed or referenced before running t
 
 ### 6.1 Area of Interest (AOI) — required
 
-A GeoJSON file containing one or more polygons defining the study area. All polygons are dissolved to a single geometry at runtime. Any projected or geographic CRS is accepted; the pipeline reprojects internally to EPSG:4326 for data exchange and EPSG:32636 (WGS 84 / UTM Zone 36N) for metric operations. If your study area falls outside UTM Zone 36N, verify that `CRS_PROJ` in `config.py` is appropriate for your region and update accordingly.
+A GeoJSON file containing one or more polygons defining the study area. All polygons are dissolved to a single geometry at runtime. Any projected or geographic CRS is accepted; the pipeline reprojects internally to EPSG:4326 for data exchange and selects an appropriate UTM projected CRS automatically based on the AOI centroid. If you need to override the projected CRS, update `CRS_PROJ` in `config.py`.
 
 Accepted formats: GeoJSON (`.geojson`, `.json`). The file may contain additional attribute columns, which are ignored.
 
 ### 6.2 Building footprints — required
 
-A polygon layer containing the building footprints to be classified. This is the primary unit of analysis; every output record corresponds to one footprint. Any CRS is accepted. Accepted formats: GeoPackage (`.gpkg`), Shapefile (`.shp`), GeoJSON, or any format readable by `geopandas.read_file()`.
+A polygon layer containing the building footprints to be classified. This is the primary unit of analysis; every output record corresponds to one footprint. Any CRS is accepted. Accepted formats: GeoPackage (`.gpkg`), GeoJSON (`.geojson`, `.json`), Shapefile (`.shp`), or any format readable by `geopandas.read_file()`. GeoPackage is recommended for large footprint layers due to faster read/write performance.
+
+The pipeline now explicitly supports both GeoJSON and GeoPackage inputs for footprints and will retry GeoJSON ingestion with a fallback reader if the first load returns unexpectedly few features.
 
 Recommended sources: Microsoft Building Footprints, Google Open Buildings, OSM-derived footprints (via Geofabrik or Humanitarian Data Exchange).
 
@@ -162,6 +164,16 @@ python run.py \
   --confidence 0.7
 ```
 
+### 7.2.1 Kigali / Rwanda example
+
+```bash
+python run.py \
+  --aoi data/input/kigali_aoi.geojson \
+  --footprints data/input/kigali_building_footprints.gpkg \
+  --project-name kigali \
+  --osm-pbf https://download.geofabrik.de/africa/rwanda-latest.osm.pbf
+```
+
 ### 7.3 CLI flags
 
 | Flag | Type | Required | Default | Description |
@@ -170,12 +182,15 @@ python run.py \
 | `--footprints` | path | Yes | — | Path to the building footprints file |
 | `--project-name` | string | No | Stem of `--aoi` filename | Short label used in all output filenames (e.g. `juba` → `juba_landuse_reference.gpkg`) |
 | `--confidence` | float | No | `0.7` | Minimum Overture Maps confidence score (0–1); records below this threshold are discarded during acquisition |
+| `--osm-pbf` | path / URL | No | None | Local path or HTTP(S) URL to an OSM PBF file. Useful for non-South Sudan AOIs such as Kigali/Rwanda. |
 | `--skip-osm` | flag | No | off | Skip OSM acquisition and use cached layers from the scratch GeoPackage |
 | `--skip-overture` | flag | No | off | Skip Overture acquisition and use the cached layer from the scratch GeoPackage |
 | `--skip-cccm` | flag | No | off | Skip CCCM acquisition and use the cached layer from the scratch GeoPackage |
 | `--include-cccm` | flag | No | off | Enable CCCM/IDP site acquisition and Tier 1 classification (see note below) |
 
 > **CCCM/IDP data is excluded by default.** The pipeline does not attempt to download or use CCCM displacement-site data unless `--include-cccm` is supplied. This flag requires either a live connection to the Humanitarian Data Exchange (HDX) API, or a manually downloaded copy of the IOM DTM site assessment masterlist placed at `data/input/cccm_masterlist_manual.xlsx`. When `--include-cccm` is not set, Tier 1 labels are not assigned and the `cccm_*` provenance columns in the output will be null for all buildings.
+
+> Note: CCCM acquisition is currently built around the South Sudan HDX masterlist workflow. For Kigali / Rwanda runs, omit `--include-cccm` unless you have an equivalent local displacement-site dataset and the necessary field mapping.
 
 ### 7.4 Incremental re-runs
 

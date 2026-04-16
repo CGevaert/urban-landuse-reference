@@ -323,7 +323,7 @@ def build_site_polygons(sites_gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
        (GeoPackage or Shapefile).  If found, left-join its geometries onto
        *sites_gdf* on ``site_id``.
     2. For sites without a polygon boundary, buffer the point geometry by
-       ``POINT_BUFFER_M`` metres (reprojects to EPSG:32636, buffers, reprojects
+       ``POINT_BUFFER_M`` metres (reprojects to CRS_PROJ, buffers, reprojects
        back to EPSG:4326).
     3. Adds a ``geometry_source`` column: ``"polygon"``,
        ``"point_buffered"``, or ``"point_buffered_osm"`` (when the boundary

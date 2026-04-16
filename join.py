@@ -400,7 +400,7 @@ def run_joins(layers_dict: dict) -> gpd.GeoDataFrame:
     ----------
     layers_dict : dict
         Output of :func:`preprocess.align.align_layers`.  All GeoDataFrames
-        must be in CRS_PROJ (EPSG:32636).
+        must be in CRS_PROJ (the AOI-specific projected CRS).
 
     Returns
     -------

@@ -1,9 +1,9 @@
 """
 acquire/osm.py — Fetch OSM features for the study area from Geofabrik.
 
-Downloads the South Sudan Geofabrik PBF extract to data/input/ (skipped if the
-file is already present) and uses pyrosm to extract buildings, land-use
-polygons, and POI nodes clipped precisely to config.AOI_GEOM.
+By default this module downloads the South Sudan Geofabrik PBF extract to
+`data/input/` (skipped if the file is already present). The source file can
+be overridden by supplying `--osm-pbf` with a local path or HTTP(S) URL.
 
 Public functions
 ----------------
@@ -25,21 +25,50 @@ from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from config import AOI_BBOX, AOI_GEOM, CRS_GEO, CRS_PROJ, SCRATCH_GPKG  # noqa: E402
+from config import AOI_BBOX, AOI_GEOM, CRS_GEO, CRS_PROJ, OSM_PBF_SOURCE, SCRATCH_GPKG  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Module-level constants
 # ---------------------------------------------------------------------------
 
-_GEOFABRIK_URL = (
+_DEFAULT_GEOFABRIK_URL = (
     "https://download.geofabrik.de/africa/south-sudan-latest.osm.pbf"
 )
-_PBF_PATH: Path = (
+_DEFAULT_PBF_PATH: Path = (
     Path(__file__).parent.parent / "data" / "input" / "south-sudan-latest.osm.pbf"
 )
 
 # pyrosm osm_type string → osm_id prefix
 _TYPE_PREFIX = {"node": "n", "way": "w", "relation": "r"}
+
+
+def _get_pbf_source() -> tuple[Optional[str], Path]:
+    """
+    Determine the PBF source for OSM acquisition.
+
+    Returns
+    -------
+    tuple[Optional[str], Path]
+        A pair of (download_url, pbf_path). If the source is a local file,
+        download_url is None and the caller uses the local path directly.
+    """
+    source = OSM_PBF_SOURCE
+    if source is None:
+        return _DEFAULT_GEOFABRIK_URL, _DEFAULT_PBF_PATH
+
+    source = source.strip()
+    if source.lower().startswith(("http://", "https://")):
+        pbf_path = _DEFAULT_PBF_PATH.parent / Path(source).name
+        return source, pbf_path
+
+    local_path = Path(source)
+    if local_path.exists():
+        return None, local_path
+
+    raise FileNotFoundError(
+        f"OSM PBF file not found: {local_path}\n"
+        "Provide an existing .osm.pbf file or a valid HTTP(S) URL via --osm-pbf."
+    )
 
 # Cached pyrosm.OSM reader (initialised once on first use)
 _osm_reader: Optional[pyrosm.OSM] = None
@@ -50,36 +79,44 @@ _osm_reader: Optional[pyrosm.OSM] = None
 
 def _ensure_pbf() -> None:
     """
-    Download the Geofabrik South Sudan PBF to *_PBF_PATH* if not already
-    present.  Streams with a tqdm progress bar; skips the download entirely
-    if the file exists.
+    Ensure the OSM PBF file exists locally.
+
+    If the source is a URL, download it into data/input/. If the source is a
+    local path, ensure it exists and skip any download.
     """
-    if _PBF_PATH.exists():
-        size_mb = _PBF_PATH.stat().st_size / 1_000_000
+    download_url, pbf_path = _get_pbf_source()
+    if pbf_path.exists():
+        size_mb = pbf_path.stat().st_size / 1_000_000
         print(
-            f"  PBF already present: {_PBF_PATH.name} "
+            f"  PBF already present: {pbf_path.name} "
             f"({size_mb:.1f} MB) — skipping download."
         )
         return
 
-    _PBF_PATH.parent.mkdir(parents=True, exist_ok=True)
-    print(f"  Downloading {_GEOFABRIK_URL} …")
+    if download_url is None:
+        raise FileNotFoundError(
+            f"OSM PBF file not found: {pbf_path}\n"
+            "Please provide an existing .osm.pbf file via --osm-pbf."
+        )
 
-    resp = requests.get(_GEOFABRIK_URL, stream=True, timeout=120)
+    pbf_path.parent.mkdir(parents=True, exist_ok=True)
+    print(f"  Downloading {download_url} …")
+
+    resp = requests.get(download_url, stream=True, timeout=120)
     resp.raise_for_status()
 
     total = int(resp.headers.get("content-length", 0))
-    with open(_PBF_PATH, "wb") as fh:
+    with open(pbf_path, "wb") as fh:
         with tqdm(
             total=total, unit="B", unit_scale=True,
-            desc=_PBF_PATH.name, ncols=80,
+            desc=pbf_path.name, ncols=80,
         ) as pbar:
             for chunk in resp.iter_content(chunk_size=65_536):
                 fh.write(chunk)
                 pbar.update(len(chunk))
 
-    size_mb = _PBF_PATH.stat().st_size / 1_000_000
-    print(f"  Downloaded → {_PBF_PATH.name} ({size_mb:.1f} MB)")
+    size_mb = pbf_path.stat().st_size / 1_000_000
+    print(f"  Downloaded → {pbf_path.name} ({size_mb:.1f} MB)")
 
 
 def _get_reader() -> pyrosm.OSM:
@@ -90,6 +127,7 @@ def _get_reader() -> pyrosm.OSM:
     global _osm_reader
     if _osm_reader is None:
         _ensure_pbf()
+        _, pbf_path = _get_pbf_source()
         bbox = [
             AOI_BBOX["west"],
             AOI_BBOX["south"],
@@ -97,7 +135,7 @@ def _get_reader() -> pyrosm.OSM:
             AOI_BBOX["north"],
         ]
         print(f"  Initialising pyrosm reader (bbox-filtered to AOI)…")
-        _osm_reader = pyrosm.OSM(str(_PBF_PATH), bounding_box=bbox)
+        _osm_reader = pyrosm.OSM(str(pbf_path), bounding_box=bbox)
     return _osm_reader
 
 
@@ -293,7 +331,7 @@ def fetch_osm_landuse() -> gpd.GeoDataFrame:
 
     Reads ways and multipolygon relations tagged ``landuse=*`` using pyrosm,
     clips to ``config.AOI_GEOM``, then drops features smaller than 100 m²
-    (projected area in EPSG:32636) as tagging errors.
+    (projected area in ``config.CRS_PROJ``) as tagging errors.
 
     Returns
     -------
