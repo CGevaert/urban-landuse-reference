@@ -107,7 +107,7 @@ def merge_building_footprints(
     overlap_threshold: float = 0.1,
     orphan_search_radius_m: float = 30.0,
     cluster_eps_m: float = 40.0,
-    min_cluster_size: int = 5,
+    min_cluster_size: int = 10,
     max_area_m2: float = 5000.0,
     base_label: str = "base",
     update_label: str = "update",
@@ -447,20 +447,23 @@ def merge_building_footprints(
     # Phase A: Identify orphan base buildings --------------------------------
     # A base building is an "orphan" if no update building centroid falls within
     # orphan_search_radius_m of its centroid.
+    #
+    # IMPORTANT: use the full original gdf_update (all buildings after clip),
+    # NOT merged["bf_source"] == "update_new". The merged dataset only contains
+    # update buildings that were genuinely new (duplicates of base buildings were
+    # dropped in step 7). Using merged alone would incorrectly flag every base
+    # building whose matching update building was dropped as a duplicate.
 
     mask_base = merged["bf_source"] == "base"
-    mask_update = merged["bf_source"] == "update_new"
 
     # Integer index arrays aligned with the merged RangeIndex
     idx_base = merged.index[mask_base].to_numpy()
     # Centroids as shapely Point objects, in the same order as idx_base
     cents_base = list(merged.loc[mask_base, "geometry"].centroid)
-    cents_update = list(merged.loc[mask_update, "geometry"].centroid)
 
-    # Build STRtree from update footprint geometries; query with buffered base
-    # centroid to get bbox candidates, then verify exact centroid distance.
-    geoms_update = list(merged.loc[mask_update, "geometry"])
-    tree_update = shapely.STRtree(geoms_update)
+    # Build STRtree from the full original update dataset (before deduplication)
+    cents_update = list(gdf_update.geometry.centroid)
+    tree_update = shapely.STRtree(gdf_update.geometry.values)
 
     is_orphan = np.zeros(len(idx_base), dtype=bool)
     for k, centroid in enumerate(cents_base):
@@ -712,11 +715,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--min-cluster-size",
         type=int,
-        default=5,
+        default=10,
         metavar="INT",
         help=(
             "Minimum number of orphan buildings to form a DBSCAN hotspot cluster. "
-            "Smaller groups are treated as noise. Default: 5."
+            "Smaller groups are treated as noise. Default: 10."
         ),
     )
     parser.add_argument(
