@@ -543,10 +543,20 @@ def merge_building_footprints(
 
     print(f"\nWriting output to {output_path}…")
 
-    merged_geo = merged.to_crs("EPSG:4326")
+    # GeoPackage reserves the name 'fid' for its internal row identifier.
+    # Drop it (and any other case variant) if it was carried in from the inputs.
+    _reserved = {"fid"}
+    def _drop_reserved(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+        cols_to_drop = [c for c in gdf.columns if c.lower() in _reserved and c != gdf.geometry.name]
+        if cols_to_drop:
+            warnings.warn(f"Dropping reserved column(s) before GPKG write: {cols_to_drop}")
+            return gdf.drop(columns=cols_to_drop)
+        return gdf
+
+    merged_geo = _drop_reserved(merged.to_crs("EPSG:4326"))
     merged_geo.to_file(str(output_path), layer="buildings_merged", driver="GPKG")
 
-    zones_geo = coverage_gap_zones.to_crs("EPSG:4326")
+    zones_geo = _drop_reserved(coverage_gap_zones.to_crs("EPSG:4326"))
     zones_geo.to_file(str(output_path), layer="coverage_gap_zones", driver="GPKG", mode="a")
 
     print(f"  buildings_merged:    {len(merged_geo):,} features")
